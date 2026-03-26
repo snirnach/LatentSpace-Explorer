@@ -7,6 +7,9 @@ import javafx.stage.Stage;
 import model.EmbeddingRepository;
 import util.DataLoader;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.List;
 
 /**
@@ -25,11 +28,11 @@ public class MainApp extends Application {
     @Override
     public void start(Stage primaryStage) {
         // Loading the generated JSON files into our Singleton Repository
-        util.DataLoader dataLoader = new util.DataLoader();
+        DataLoader dataLoader = new DataLoader();
         String basePath = "src/"; // The folder where you ran the Python script
         dataLoader.loadDataToRepository(basePath + "full_vectors.json", basePath + "pca_vectors.json");
 
-        System.out.println("Loaded " + model.EmbeddingRepository.INSTANCE.getAllWords().size() + " words into the repository.");
+        System.out.println("Loaded " + EmbeddingRepository.INSTANCE.getAllWords().size() + " words into the repository.");
         loadRepositoryDataIfConfigured();
 
         MainController mainController = new MainController();
@@ -56,8 +59,17 @@ public class MainApp extends Application {
             return;
         }
 
+        Path inputPath = Paths.get(jsonDataPath);
+        Path baseDirectory = Files.isDirectory(inputPath) ? inputPath : inputPath.getParent();
+        if (baseDirectory == null) {
+            return;
+        }
+
         DataLoader dataLoader = new DataLoader();
-        dataLoader.loadJsonToRepository(jsonDataPath);
+        dataLoader.loadDataToRepository(
+                baseDirectory.resolve("full_vectors.json").toString(),
+                baseDirectory.resolve("pca_vectors.json").toString()
+        );
     }
 
     /**

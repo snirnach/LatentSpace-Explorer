@@ -3,6 +3,7 @@ package service;
 import model.WordNode;
 import model.EmbeddingRepository;
 import model.distance.DistanceStrategy;
+import model.distance.DistanceStrategyFactory;
 import model.distance.EuclideanDistance;
 import java.util.*;
 
@@ -96,6 +97,24 @@ public class KNNService {
         }
         Collections.reverse(result);
         return result;
+    }
+
+    /**
+     * Finds nearest neighbors for a raw vector using the requested distance metric.
+     *
+     * @param targetVector target vector for similarity search
+     * @param k number of neighbors to return
+     * @param distanceMetric distance metric label (for example, "Euclidean" or "Cosine")
+     * @return nearest neighbors sorted by increasing distance
+     */
+    public List<WordNode> findSimilarToVector(double[] targetVector, int k, String distanceMetric) {
+        if (targetVector == null || k <= 0) {
+            return Collections.emptyList();
+        }
+
+        DistanceStrategy strategy = DistanceStrategyFactory.createStrategy(distanceMetric);
+        setDistanceStrategy(strategy);
+        return findNearestNeighbors(targetVector, k);
     }
 
     /**

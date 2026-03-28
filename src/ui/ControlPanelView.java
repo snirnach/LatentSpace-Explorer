@@ -2,6 +2,8 @@ package ui;
 
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
+import javafx.event.ActionEvent;
+import javafx.event.EventHandler;
 import javafx.geometry.Insets;
 import javafx.scene.control.Button;
 import javafx.scene.control.ComboBox;
@@ -20,6 +22,11 @@ import javafx.scene.layout.VBox;
  * <p>This class owns sidebar layout and styling, while the controller owns behavior.</p>
  */
 public class ControlPanelView {
+
+    @FunctionalInterface
+    public interface PcaAxesChangeListener {
+        void onAxesChanged(int x, int y, int z);
+    }
 
     private static final int PCA_COMPONENT_COUNT = 50;
     private static final String EUCLIDEAN_METRIC_NAME = "Euclidean";
@@ -47,10 +54,9 @@ public class ControlPanelView {
     private final TextField semanticAxisWordBField;
     private final Button projectOnAxisButton;
     private final Button analyzeSubspaceGroupButton;
-    private final PcaStateSubject pcaStateSubject;
+    private PcaAxesChangeListener pcaAxesChangeListener;
 
-    public ControlPanelView(PcaStateSubject pcaStateSubject) {
-        this.pcaStateSubject = pcaStateSubject;
+    public ControlPanelView() {
         this.searchField = new TextField();
         this.distanceMetricCombo = new ComboBox<>(FXCollections.observableArrayList(
                 EUCLIDEAN_METRIC_NAME,
@@ -109,24 +115,23 @@ public class ControlPanelView {
         this.projectOnAxisButton.setFocusTraversable(false);
         this.analyzeSubspaceGroupButton.setFocusTraversable(false);
 
-        wirePcaSubjectUpdates();
+        wirePcaSelectionUpdates();
     }
 
-    private void wirePcaSubjectUpdates() {
-        if (pcaStateSubject == null) {
-            return;
-        }
-
+    private void wirePcaSelectionUpdates() {
         pcaXCombo.valueProperty().addListener((ignoredObservable, ignoredOldValue, ignoredNewValue) -> publishAxes());
         pcaYCombo.valueProperty().addListener((ignoredObservable, ignoredOldValue, ignoredNewValue) -> publishAxes());
         pcaZCombo.valueProperty().addListener((ignoredObservable, ignoredOldValue, ignoredNewValue) -> publishAxes());
     }
 
     private void publishAxes() {
+        if (pcaAxesChangeListener == null) {
+            return;
+        }
         int x = pcaXCombo.getValue() == null ? 0 : pcaXCombo.getValue();
         int y = pcaYCombo.getValue() == null ? 1 : pcaYCombo.getValue();
         int z = pcaZCombo.getValue() == null ? 2 : pcaZCombo.getValue();
-        pcaStateSubject.updateAxes(x, y, z);
+        pcaAxesChangeListener.onAxesChanged(x, y, z);
     }
 
     /**
@@ -267,81 +272,101 @@ public class ControlPanelView {
         return selector;
     }
 
-    public ToggleButton getToggle3dButton() {
-        return toggle3dButton;
+    public void setOnSearchAction(EventHandler<ActionEvent> handler) {
+        searchButton.setOnAction(handler);
+        searchField.setOnAction(handler);
     }
 
-
-    public ComboBox<String> getDistanceMetricCombo() {
-        return distanceMetricCombo;
+    public void setOnToggleViewAction(EventHandler<ActionEvent> handler) {
+        toggle3dButton.setOnAction(handler);
     }
 
-    public TextField getSearchField() {
-        return searchField;
+    public void setOnZoomInAction(EventHandler<ActionEvent> handler) {
+        zoomInButton.setOnAction(handler);
     }
 
-    public Button getSearchButton() {
-        return searchButton;
+    public void setOnZoomOutAction(EventHandler<ActionEvent> handler) {
+        zoomOutButton.setOnAction(handler);
     }
 
-    public ListView<String> getResultsListView() {
-        return resultsListView;
+    public void setOnMeasureAction(EventHandler<ActionEvent> handler) {
+        measureButton.setOnAction(handler);
     }
 
-    public Button getZoomInButton() {
-        return zoomInButton;
+    public void setOnCalculateEquationAction(EventHandler<ActionEvent> handler) {
+        calculateEquationButton.setOnAction(handler);
     }
 
-    public Button getZoomOutButton() {
-        return zoomOutButton;
+    public void setOnProjectAxisAction(EventHandler<ActionEvent> handler) {
+        projectOnAxisButton.setOnAction(handler);
     }
 
-    public Button getMeasureButton() {
-        return measureButton;
+    public void setOnAnalyzeSubspaceGroupAction(EventHandler<ActionEvent> handler) {
+        analyzeSubspaceGroupButton.setOnAction(handler);
     }
 
-    public Label getSelectedWordLabel() {
-        return selectedWordLabel;
+    public void setOnPcaAxesChanged(PcaAxesChangeListener listener) {
+        this.pcaAxesChangeListener = listener;
     }
 
-    public Label getDistanceResultLabel() {
-        return distanceResultLabel;
+    public String getSearchText() {
+        return searchField.getText();
     }
 
-    public Label getStatusLabel() {
-        return statusLabel;
+    public String getEquationText() {
+        return equationField.getText();
+    }
+
+    public String getSemanticAxisWordAText() {
+        return semanticAxisWordAField.getText();
+    }
+
+    public String getSemanticAxisWordBText() {
+        return semanticAxisWordBField.getText();
+    }
+
+    public String getDistanceMetric() {
+        return distanceMetricCombo.getValue();
     }
 
     public int getKValue() {
         return kSpinner.getValue();
     }
 
-    public TextField getSemanticAxisWordAField() {
-        return semanticAxisWordAField;
+    public void displayResults(ObservableList<String> results) {
+        resultsListView.setItems(results);
     }
 
-    public TextField getSemanticAxisWordBField() {
-        return semanticAxisWordBField;
+    public void clearResults() {
+        resultsListView.getItems().clear();
     }
 
-    public Button getProjectOnAxisButton() {
-        return projectOnAxisButton;
+    public void setResultsTitle(String title) {
+        resultsTitleLabel.setText(title);
     }
 
-    public TextField getEquationField() {
-        return equationField;
+    public void setStatusMessage(String message) {
+        statusLabel.setText(message);
     }
 
-    public Button getCalculateEquationButton() {
-        return calculateEquationButton;
+    public void setSelectedWordText(String text) {
+        selectedWordLabel.setText(text);
     }
 
-    public Button getAnalyzeSubspaceGroupButton() {
-        return analyzeSubspaceGroupButton;
+    public void setDistanceResultText(String text) {
+        distanceResultLabel.setText(text);
     }
 
-    public Label getResultsTitleLabel() {
-        return resultsTitleLabel;
+    public void setMeasureButtonDisabled(boolean disabled) {
+        measureButton.setDisable(disabled);
+    }
+
+    public boolean isToggle3DSelected() {
+        return toggle3dButton.isSelected();
+    }
+
+    public void setToggleButtonText(String text) {
+        toggle3dButton.setText(text);
     }
 }
 

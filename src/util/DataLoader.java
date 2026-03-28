@@ -8,8 +8,6 @@ import model.WordNode;
 import java.io.FileReader;
 import java.io.IOException;
 import java.lang.reflect.Type;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,23 +55,6 @@ public class DataLoader {
         }
     }
 
-    /**
-     * Backward-compatible convenience loader.
-     * If a file path is provided, its parent directory is used.
-     */
-    @Deprecated
-    public void loadJsonToRepository(String path) {
-        Path inputPath = Paths.get(path);
-        Path baseDirectory = inputPath.toFile().isDirectory() ? inputPath : inputPath.getParent();
-
-        if (baseDirectory == null) {
-            throw new IllegalArgumentException("Cannot resolve base directory from path: " + path);
-        }
-
-        Path fullPath = baseDirectory.resolve("full_vectors.json");
-        Path pcaPath = baseDirectory.resolve("pca_vectors.json");
-        loadDataToRepository(fullPath.toString(), pcaPath.toString());
-    }
 
     private List<VectorEntry> parseVectorEntries(String jsonFilePath) throws IOException {
         try (FileReader reader = new FileReader(jsonFilePath)) {

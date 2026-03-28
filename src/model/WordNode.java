@@ -39,4 +39,19 @@ public class WordNode {
     public void setPcaVector(double[] pcaVector) {
         this.pcaVector = pcaVector;
     }
+
+    /**
+     * Compares this node with another node by word value, ignoring case.
+     *
+     * @param other the other node to compare
+     * @return true when both nodes have non-null words that are equal ignoring case
+     */
+    public boolean isSameWord(WordNode other) {
+        return other != null
+                && this.word != null
+                && !this.word.isBlank()
+                && other.word != null
+                && !other.word.isBlank()
+                && this.word.equalsIgnoreCase(other.word);
+    }
 }

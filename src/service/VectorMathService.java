@@ -21,111 +21,6 @@ import java.util.Set;
 public class VectorMathService {
 
     /**
-     * Adds two vectors element-wise.
-     * @param v1 the first vector
-     * @param v2 the second vector
-     * @return a new vector that is the element-wise sum of v1 and v2
-     * @throws IllegalArgumentException if vectors have different lengths
-     */
-    private double[] addVectors(double[] v1, double[] v2) {
-        if (v1.length != v2.length) {
-            throw new IllegalArgumentException("Vectors must have the same length for addition");
-        }
-        double[] result = new double[v1.length];
-        for (int i = 0; i < v1.length; i++) {
-            result[i] = v1[i] + v2[i];
-        }
-        return result;
-    }
-
-    /**
-     * Subtracts the second vector from the first element-wise.
-     * @param v1 the vector to subtract from
-     * @param v2 the vector to subtract
-     * @return a new vector that is the element-wise difference (v1 - v2)
-     * @throws IllegalArgumentException if vectors have different lengths
-     */
-    private double[] subtractVectors(double[] v1, double[] v2) {
-        if (v1.length != v2.length) {
-            throw new IllegalArgumentException("Vectors must have the same length for subtraction");
-        }
-        double[] result = new double[v1.length];
-        for (int i = 0; i < v1.length; i++) {
-            result[i] = v1[i] - v2[i];
-        }
-        return result;
-    }
-
-    /**
-     * Calculates a synthetic vector based on an equation of positive and negative word contributions.
-     * For example, positiveWords = ["king", "woman"], negativeWords = ["man"] computes "king - man + woman".
-     * Starts with a zero vector and iteratively adds positive vectors and subtracts negative vectors.
-     * Skips words that do not exist in the repository and logs a warning.
-     * @param positiveWords list of words to add to the equation
-     * @param negativeWords list of words to subtract from the equation
-     * @return the resulting synthetic vector
-     * @throws IllegalArgumentException if no valid words are found or vector lengths mismatch
-     */
-    public double[] calculateEquation(List<String> positiveWords, List<String> negativeWords) {
-        // Determine vector size from the first valid word
-        int vectorSize = -1;
-        for (String word : positiveWords) {
-            WordNode node = EmbeddingRepository.INSTANCE.getWord(word);
-            if (node != null) {
-                vectorSize = node.getOriginalVector().length;
-                break;
-            }
-        }
-        if (vectorSize == -1) {
-            for (String word : negativeWords) {
-                WordNode node = EmbeddingRepository.INSTANCE.getWord(word);
-                if (node != null) {
-                    vectorSize = node.getOriginalVector().length;
-                    break;
-                }
-            }
-        }
-        if (vectorSize == -1) {
-            throw new IllegalArgumentException("No valid words found in the repository to determine vector size");
-        }
-
-        // Initialize result as zero vector
-        double[] result = new double[vectorSize];
-
-        // Add positive words
-        for (String word : positiveWords) {
-            WordNode node = EmbeddingRepository.INSTANCE.getWord(word);
-            if (node != null) {
-                double[] vec = node.getOriginalVector();
-                if (vec.length != vectorSize) {
-                    System.out.println("Warning: Skipping word '" + word + "' due to vector length mismatch");
-                    continue;
-                }
-                result = addVectors(result, vec);
-            } else {
-                System.out.println("Warning: Word '" + word + "' not found in repository, skipping");
-            }
-        }
-
-        // Subtract negative words
-        for (String word : negativeWords) {
-            WordNode node = EmbeddingRepository.INSTANCE.getWord(word);
-            if (node != null) {
-                double[] vec = node.getOriginalVector();
-                if (vec.length != vectorSize) {
-                    System.out.println("Warning: Skipping word '" + word + "' due to vector length mismatch");
-                    continue;
-                }
-                result = subtractVectors(result, vec);
-            } else {
-                System.out.println("Warning: Word '" + word + "' not found in repository, skipping");
-            }
-        }
-
-        return result;
-    }
-
-    /**
      * Calculates the scalar projection of all words onto a semantic axis defined by two words.
      * The axis is calculated as vectorA - vectorB, and each word's projection is computed as
      * (dotProduct(wordVector, axis)) / norm(axis).
@@ -154,10 +49,10 @@ public class VectorMathService {
         }
 
         // Calculate the axis vector: axis = vectorA - vectorB.
-        double[] axis = subtractVectors(vectorA, vectorB);
+        double[] axis = VectorMathUtils.subtractVectors(vectorA, vectorB);
 
         // Calculate the magnitude (norm) of the axis vector.
-        double axisNorm = calculateVectorNorm(axis);
+        double axisNorm = VectorMathUtils.calculateVectorNorm(axis);
 
         // Avoid division by zero.
         if (axisNorm == 0.0) {
@@ -180,7 +75,7 @@ public class VectorMathService {
             }
 
             // Calculate scalar projection: (dotProduct(wordVector, axis)) / norm(axis).
-            double dotProduct = calculateDotProduct(wordVector, axis);
+            double dotProduct = VectorMathUtils.calculateDotProduct(wordVector, axis);
             double projection = dotProduct / axisNorm;
 
             // Store the result as a map entry.
@@ -221,9 +116,7 @@ public class VectorMathService {
                 continue;
             }
 
-            for (int i = 0; i < vector.length; i++) {
-                sumVector[i] += vector[i];
-            }
+            sumVector = VectorMathUtils.addVectors(sumVector, vector);
             validCount++;
         }
 
@@ -310,9 +203,9 @@ public class VectorMathService {
             }
             excludedWords.add(wordNode.getWord().toLowerCase());
 
-            for (int i = 0; i < targetVector.length; i++) {
-                targetVector[i] += operator * wordVector[i];
-            }
+            targetVector = operator > 0
+                    ? VectorMathUtils.addVectors(targetVector, wordVector)
+                    : VectorMathUtils.subtractVectors(targetVector, wordVector);
         }
 
         if (!initialized) {
@@ -336,12 +229,9 @@ public class VectorMathService {
                 continue;
             }
 
-            double distance = 0.0;
-            for (int i = 0; i < targetVector.length; i++) {
-                double diff = targetVector[i] - candidateVector[i];
-                distance += diff * diff;
-            }
-            distance = Math.sqrt(distance);
+            double distance = VectorMathUtils.calculateVectorNorm(
+                    VectorMathUtils.subtractVectors(targetVector, candidateVector)
+            );
 
             if (distance < bestDistance) {
                 bestDistance = distance;
@@ -365,37 +255,4 @@ public class VectorMathService {
                 .orElse(null);
     }
 
-    /**
-     * Calculates the dot product (scalar product) of two vectors.
-     *
-     * @param v1 the first vector
-     * @param v2 the second vector
-     * @return the dot product of v1 and v2
-     * @throws IllegalArgumentException if vectors have different lengths
-     */
-    private double calculateDotProduct(double[] v1, double[] v2) {
-        if (v1.length != v2.length) {
-            throw new IllegalArgumentException("Vectors must have the same length for dot product calculation");
-        }
-
-        double result = 0.0;
-        for (int i = 0; i < v1.length; i++) {
-            result += v1[i] * v2[i];
-        }
-        return result;
-    }
-
-    /**
-     * Calculates the Euclidean norm (magnitude) of a vector.
-     *
-     * @param v the vector
-     * @return the Euclidean norm of the vector
-     */
-    private double calculateVectorNorm(double[] v) {
-        double sumOfSquares = 0.0;
-        for (double component : v) {
-            sumOfSquares += component * component;
-        }
-        return Math.sqrt(sumOfSquares);
-    }
 }

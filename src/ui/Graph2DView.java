@@ -1,12 +1,10 @@
 package ui;
 
 import javafx.scene.canvas.Canvas;
-import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.ScrollEvent;
 import javafx.scene.layout.Pane;
-import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
 import model.WordNode;
 
@@ -23,12 +21,6 @@ import java.util.function.Consumer;
  */
 public class Graph2DView implements IVisualizationView {
 
-    private static final double BASE_POINT_SIZE = 5.0;
-    private static final double HIGHLIGHT_POINT_SIZE = 7.0;
-    private static final String BASE_COLOR = "#7F8C8D";
-    private static final String HIGHLIGHT_COLOR = "#1D6FEA";
-    private static final String SOURCE_COLOR = "#E74C3C";
-
     private static final double TWO_D_ZOOM_STEP = 1.10;
     private static final double TWO_D_MIN_SCALE = 0.50;
     private static final double TWO_D_MAX_SCALE = 20.00;
@@ -37,11 +29,14 @@ public class Graph2DView implements IVisualizationView {
 
     private final Pane centerWrapper;
     private final Canvas canvas;
+    private final Graph2DRenderer renderer;
 
     private Consumer<WordNode> onWordClicked;
 
     private double lastMouseX;
     private double lastMouseY;
+    private double pressMouseX;
+    private double pressMouseY;
     private double zoomFactor = 1.0;
     private double offsetX = 0.0;
     private double offsetY = 0.0;
@@ -70,6 +65,7 @@ public class Graph2DView implements IVisualizationView {
     public Graph2DView() {
         this.centerWrapper = new Pane();
         this.canvas = new Canvas();
+        this.renderer = new Graph2DRenderer(canvas.getGraphicsContext2D());
         this.centerWrapper.setFocusTraversable(false);
         this.canvas.setFocusTraversable(false);
         this.centerWrapper.getChildren().add(canvas);
@@ -121,42 +117,24 @@ public class Graph2DView implements IVisualizationView {
     @Override
     public void focusOnWord(WordNode word) {
         this.focusedWord = word;
-        this.probeSource = null;
-        if (this.probeNeighbors != null) {
-            this.probeNeighbors.clear();
-        }
-        this.mathPathWords = null;
-        this.mathResultWord = null;
-
-        if (!isWordPlottable(word)) {
-            redraw();
-            return;
-        }
-
-        setSelectedWord(word);
-        computeDataRange();
-        if (!hasValidRange) {
-            redraw();
-            return;
-        }
-
-        double width = canvas.getWidth();
-        double height = canvas.getHeight();
-        if (width <= 0 || height <= 0) {
+        if (word == null || !hasValidRange) {
             redraw();
             return;
         }
 
         double[] vector = word.getPcaVector();
-        double baseX = ((vector[axisX] - minX) / (maxX - minX)) * width;
-        double baseY = (1.0 - ((vector[axisY] - minY) / (maxY - minY))) * height;
+        if (vector == null || vector.length <= Math.max(axisX, axisY)) {
+            redraw();
+            return;
+        }
 
-        double centerX = width / 2.0;
-        double centerY = height / 2.0;
+        // Calculate the raw un-panned pixel position for the active axes.
+        double rawPixelX = renderer.toCanvasX(vector[axisX], canvas.getWidth(), minX, maxX, 0.0, zoomFactor);
+        double rawPixelY = renderer.toCanvasY(vector[axisY], canvas.getHeight(), minY, maxY, 0.0, zoomFactor);
 
-        // Keep current zoom level and adjust offsets so the target word lands at the center.
-        offsetX = centerX - (baseX * zoomFactor);
-        offsetY = centerY - (baseY * zoomFactor);
+        // Recenter by offsetting the raw pixel position into the canvas center.
+        this.offsetX = (canvas.getWidth() / 2.0) - rawPixelX;
+        this.offsetY = (canvas.getHeight() / 2.0) - rawPixelY;
         redraw();
     }
 
@@ -198,7 +176,16 @@ public class Graph2DView implements IVisualizationView {
         this.axisX = (selectedAxes != null && selectedAxes.length > 0) ? selectedAxes[0] : 0;
         this.axisY = (selectedAxes != null && selectedAxes.length > 1) ? selectedAxes[1] : 1;
         this.cachedWords = words == null ? List.of() : new ArrayList<>(words);
-        redraw();
+
+        // Force recalculation of min/max bounds for the new axes BEFORE focusing
+        computeDataRange();
+
+        // Auto-refocus if a word is currently selected, otherwise just redraw
+        if (this.focusedWord != null) {
+            focusOnWord(this.focusedWord);
+        } else {
+            redraw();
+        }
     }
 
     /**
@@ -209,7 +196,7 @@ public class Graph2DView implements IVisualizationView {
     public void showNearestNeighbors(WordNode source, List<WordNode> neighbors) {
         this.probeSource = source;
         this.probeNeighbors = neighbors != null ? new ArrayList<>(neighbors) : new ArrayList<>();
-        this.focusedWord = null;
+        this.focusedWord = source;
         this.mathPathWords = null;
         this.mathResultWord = null;
         redraw();
@@ -293,24 +280,11 @@ public class Graph2DView implements IVisualizationView {
     }
 
 
-    private MarkerStyle resolveStyle(WordNode wordNode) {
-        String key = wordNode.getWord() == null ? null : wordNode.getWord().toLowerCase(Locale.ROOT);
-        if (key != null && key.equals(sourceWordKey)) {
-            return new MarkerStyle(SOURCE_COLOR, HIGHLIGHT_POINT_SIZE);
-        }
-
-        if (key != null && highlightedWordKeys.contains(key)) {
-            return new MarkerStyle(HIGHLIGHT_COLOR, HIGHLIGHT_POINT_SIZE);
-        }
-
-        return new MarkerStyle(BASE_COLOR, BASE_POINT_SIZE);
-    }
-
     private void wireInteractions() {
         canvas.setOnScroll(this::handleCanvasScroll);
         canvas.setOnMousePressed(this::handleCanvasMousePressed);
         canvas.setOnMouseDragged(this::handlePanMouseDragged);
-        canvas.setOnMouseReleased(ignoredEvent -> suppressPanUntilRelease = false);
+        canvas.setOnMouseReleased(this::handleMouseReleased);
     }
 
     private void handleCanvasScroll(ScrollEvent event) {
@@ -328,16 +302,20 @@ public class Graph2DView implements IVisualizationView {
             return;
         }
 
-        // Always refresh pan anchors using absolute scene coordinates.
+        // Store press anchor in scene coordinates for robust click-vs-drag detection.
+        pressMouseX = event.getSceneX();
+        pressMouseY = event.getSceneY();
+
+        // Track the latest drag anchor independently for smooth panning deltas.
         lastMouseX = event.getSceneX();
         lastMouseY = event.getSceneY();
 
-        WordNode clickedWord = findClosestWord(event.getX(), event.getY());
-        if (clickedWord != null) {
-            if (event.isShiftDown()) {
-                // Shift-click toggles subspace group membership without triggering the standard probe flow.
-                if (selectedGroup.stream().anyMatch(node -> isSameWord(node, clickedWord))) {
-                    selectedGroup.removeIf(node -> isSameWord(node, clickedWord));
+        // Handle shift-click for subspace group membership (toggle immediately).
+        if (event.isShiftDown()) {
+            WordNode clickedWord = findClosestWord(event.getX(), event.getY());
+            if (clickedWord != null) {
+                if (selectedGroup.stream().anyMatch(node -> node != null && node.isSameWord(clickedWord))) {
+                    selectedGroup.removeIf(node -> node != null && node.isSameWord(clickedWord));
                 } else {
                     selectedGroup.add(clickedWord);
                 }
@@ -346,18 +324,9 @@ public class Graph2DView implements IVisualizationView {
                 event.consume();
                 return;
             }
-
-            // A regular click starts standard probe selection and clears any existing subspace group selection.
-            selectedGroup.clear();
-            if (onWordClicked != null) {
-                onWordClicked.accept(clickedWord);
-            }
-            // Prevent a micro-drag after point selection from shifting the whole view.
-            suppressPanUntilRelease = true;
-            event.consume();
-            return;
         }
 
+        // For regular clicks, we wait until mouse release to determine if it's a click or drag.
         suppressPanUntilRelease = false;
     }
 
@@ -388,6 +357,48 @@ public class Graph2DView implements IVisualizationView {
         event.consume();
     }
 
+    /**
+     * Handles mouse release: detects click vs drag based on distance threshold.
+     * If distance is below threshold, processes word selection. Otherwise, it was a pan.
+     */
+    private void handleMouseReleased(MouseEvent event) {
+        if (!event.getButton().equals(MouseButton.PRIMARY)) {
+            suppressPanUntilRelease = false;
+            return;
+        }
+
+        // Calculate total movement from press anchor to release position.
+        double deltaX = event.getSceneX() - pressMouseX;
+        double deltaY = event.getSceneY() - pressMouseY;
+        double distanceMoved = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+        // Only process word selection if the distance is below the drag threshold.
+        if (distanceMoved < DRAG_THRESHOLD_PIXELS) {
+            WordNode closestWord = findClosestWord(event.getX(), event.getY());
+            if (closestWord != null) {
+                // A regular click starts standard probe selection and clears any existing subspace group selection.
+                selectedGroup.clear();
+                focusOnWord(closestWord);
+                if (onWordClicked != null) {
+                    onWordClicked.accept(closestWord);
+                }
+                suppressPanUntilRelease = true;
+                event.consume();
+            } else {
+                // Click on empty area: clear selection.
+                focusOnWord(null);
+                if (onWordClicked != null) {
+                    onWordClicked.accept(null);
+                }
+                suppressPanUntilRelease = false;
+                event.consume();
+            }
+        } else {
+            // It was a drag/pan operation: do not change selection.
+            suppressPanUntilRelease = false;
+        }
+    }
+
     private void applyZoomAt(double mouseX, double mouseY, double scaleMultiplier) {
         double targetZoom = zoomFactor * scaleMultiplier;
         double clampedZoom = Math.max(TWO_D_MIN_SCALE, Math.min(TWO_D_MAX_SCALE, targetZoom));
@@ -407,157 +418,49 @@ public class Graph2DView implements IVisualizationView {
         double width = canvas.getWidth();
         double height = canvas.getHeight();
 
-        GraphicsContext gc = canvas.getGraphicsContext2D();
-        gc.clearRect(0, 0, width, height);
-
         if (width <= 0 || height <= 0 || cachedWords.isEmpty()) {
             hasValidRange = false;
+            renderer.render(
+                    width,
+                    height,
+                    offsetX,
+                    offsetY,
+                    zoomFactor,
+                    cachedWords,
+                    new int[]{axisX, axisY},
+                    focusedWord,
+                    probeSource,
+                    probeNeighbors,
+                    mathPathWords,
+                    mathResultWord,
+                    selectedGroup
+            );
             return;
         }
 
         computeDataRange();
-        if (!hasValidRange) {
-            return;
+
+        WordNode effectiveFocusedWord = focusedWord;
+        if (effectiveFocusedWord != null && !isWordPlottable(effectiveFocusedWord)) {
+            effectiveFocusedWord = null;
         }
 
-        // Draw vector arithmetic path before marker rendering.
-        if (mathPathWords != null && !mathPathWords.isEmpty()) {
-            gc.save();
-            gc.setStroke(Color.MAGENTA);
-            gc.setLineWidth(3.0);
-            gc.setLineDashes(10.0, 6.0);
-
-            WordNode previous = null;
-            for (WordNode pathWord : mathPathWords) {
-                if (!isWordPlottable(pathWord)) {
-                    continue;
-                }
-
-                if (previous != null && isWordPlottable(previous)) {
-                    double[] previousVector = previous.getPcaVector();
-                    double[] currentVector = pathWord.getPcaVector();
-                    double x1 = toCanvasX(previousVector[axisX], width);
-                    double y1 = toCanvasY(previousVector[axisY], height);
-                    double x2 = toCanvasX(currentVector[axisX], width);
-                    double y2 = toCanvasY(currentVector[axisY], height);
-                    gc.strokeLine(x1, y1, x2, y2);
-                }
-
-                previous = pathWord;
-            }
-
-            if (previous != null && isWordPlottable(previous) && isWordPlottable(mathResultWord)) {
-                double[] previousVector = previous.getPcaVector();
-                double[] resultVector = mathResultWord.getPcaVector();
-                double x1 = toCanvasX(previousVector[axisX], width);
-                double y1 = toCanvasY(previousVector[axisY], height);
-                double x2 = toCanvasX(resultVector[axisX], width);
-                double y2 = toCanvasY(resultVector[axisY], height);
-                gc.strokeLine(x1, y1, x2, y2);
-            }
-            gc.restore();
-        }
-
-        // Draw probe connection lines before marker rendering.
-        if (!probeNeighbors.isEmpty() && isWordPlottable(probeSource)) {
-            double[] sourceVector = probeSource.getPcaVector();
-            double sourceX = toCanvasX(sourceVector[axisX], width);
-            double sourceY = toCanvasY(sourceVector[axisY], height);
-
-            gc.setStroke(Color.DARKGRAY);
-            gc.setLineWidth(1.5);
-
-            for (WordNode neighbor : probeNeighbors) {
-                if (!isWordPlottable(neighbor)) {
-                    continue;
-                }
-
-                double[] neighborVector = neighbor.getPcaVector();
-                double neighborX = toCanvasX(neighborVector[axisX], width);
-                double neighborY = toCanvasY(neighborVector[axisY], height);
-
-                gc.strokeLine(sourceX, sourceY, neighborX, neighborY);
-            }
-        }
-
-        // Draw markers and apply probe-specific highlighting.
-        for (WordNode wordNode : cachedWords) {
-            if (!isWordPlottable(wordNode)) {
-                continue;
-            }
-
-            double[] vector = wordNode.getPcaVector();
-            double pixelX = toCanvasX(vector[axisX], width);
-            double pixelY = toCanvasY(vector[axisY], height);
-
-            // Check if this word is the probe source or a neighbor
-            boolean isProbeSource = probeSource != null && isSameWord(wordNode, probeSource);
-            boolean isProbeNeighbor = probeNeighbors.stream().anyMatch(neighbor -> isSameWord(wordNode, neighbor));
-            boolean isMathPathWord = mathPathWords != null
-                    && mathPathWords.stream().anyMatch(pathWord -> isSameWord(wordNode, pathWord));
-            boolean isMathResultWord = mathResultWord != null && isSameWord(wordNode, mathResultWord);
-            boolean isSelectedGroupWord = selectedGroup.stream().anyMatch(groupNode -> isSameWord(groupNode, wordNode));
-
-            if (isSelectedGroupWord) {
-                gc.setFill(Color.PURPLE);
-                double groupSize = HIGHLIGHT_POINT_SIZE + 2.0;
-                gc.fillOval(pixelX - (groupSize / 2.0), pixelY - (groupSize / 2.0), groupSize, groupSize);
-                gc.setFill(Color.BLACK);
-                gc.fillText(wordNode.getWord(), pixelX + 6, pixelY - 6);
-                continue;
-            }
-
-            if (isMathPathWord || isMathResultWord) {
-                if (isMathResultWord) {
-                    gc.setFill(Color.DODGERBLUE);
-                    double resultSize = HIGHLIGHT_POINT_SIZE + 3.0;
-                    gc.fillOval(pixelX - (resultSize / 2.0), pixelY - (resultSize / 2.0), resultSize, resultSize);
-                } else {
-                    gc.setFill(Color.MAGENTA);
-                    double pathSize = HIGHLIGHT_POINT_SIZE + 1.5;
-                    gc.fillOval(pixelX - (pathSize / 2.0), pixelY - (pathSize / 2.0), pathSize, pathSize);
-                }
-
-                gc.setFill(Color.BLACK);
-                gc.fillText(wordNode.getWord(), pixelX + 6, pixelY - 6);
-                continue;
-            }
-
-            if (isProbeSource || isProbeNeighbor) {
-                // Highlight probe words with larger dots, distinct colors, and labels
-                if (isProbeSource) {
-                    gc.setFill(Color.ORANGE);
-                    double probeSize = HIGHLIGHT_POINT_SIZE + 2.0;
-                    gc.fillOval(pixelX - (probeSize / 2.0), pixelY - (probeSize / 2.0), probeSize, probeSize);
-                    gc.setFill(Color.BLACK);
-                    gc.fillText(wordNode.getWord(), pixelX + 5, pixelY - 5);
-                } else {
-                    gc.setFill(Color.GREEN);
-                    double neighborSize = HIGHLIGHT_POINT_SIZE;
-                    gc.fillOval(pixelX - (neighborSize / 2.0), pixelY - (neighborSize / 2.0), neighborSize, neighborSize);
-                    gc.setFill(Color.BLACK);
-                    gc.fillText(wordNode.getWord(), pixelX + 5, pixelY - 5);
-                }
-                continue;
-            }
-
-            if (isSameWord(wordNode, focusedWord)) {
-                // Highlight and label the actively focused word.
-                gc.setFill(Color.RED);
-                double focusedSize = Math.max(HIGHLIGHT_POINT_SIZE + 2.0, 9.0);
-                gc.fillOval(pixelX - (focusedSize / 2.0), pixelY - (focusedSize / 2.0), focusedSize, focusedSize);
-                gc.fillText(wordNode.getWord(), pixelX + 10, pixelY - 10);
-                continue;
-            }
-
-            MarkerStyle style = resolveStyle(wordNode);
-            if (BASE_COLOR.equals(style.color)) {
-                gc.setFill(Color.BLACK);
-            } else {
-                gc.setFill(Color.web(style.color));
-            }
-            gc.fillOval(pixelX - (style.size / 2.0), pixelY - (style.size / 2.0), style.size, style.size);
-        }
+        renderer.setHighlightState(highlightedWordKeys, sourceWordKey);
+        renderer.render(
+                width,
+                height,
+                offsetX,
+                offsetY,
+                zoomFactor,
+                cachedWords,
+                new int[]{axisX, axisY},
+                effectiveFocusedWord,
+                probeSource,
+                probeNeighbors,
+                mathPathWords,
+                mathResultWord,
+                selectedGroup
+        );
     }
 
     private void computeDataRange() {
@@ -613,26 +516,6 @@ public class Graph2DView implements IVisualizationView {
         return Double.isFinite(x) && Double.isFinite(y);
     }
 
-    private double toCanvasX(double valueX, double width) {
-        double normalized = (valueX - minX) / (maxX - minX);
-        double baseX = normalized * width;
-        return applyViewTransformX(baseX, width);
-    }
-
-    private double toCanvasY(double valueY, double height) {
-        double normalized = (valueY - minY) / (maxY - minY);
-        double baseY = (1.0 - normalized) * height;
-        return applyViewTransformY(baseY, height);
-    }
-
-    private double applyViewTransformX(double x, double width) {
-        return offsetX + (x * zoomFactor);
-    }
-
-    private double applyViewTransformY(double y, double height) {
-        return offsetY + (y * zoomFactor);
-    }
-
     private WordNode findClosestWord(double clickX, double clickY) {
         if (!hasValidRange || cachedWords.isEmpty()) {
             return null;
@@ -651,8 +534,8 @@ public class Graph2DView implements IVisualizationView {
             }
 
             double[] vector = wordNode.getPcaVector();
-            double pixelX = toCanvasX(vector[axisX], width);
-            double pixelY = toCanvasY(vector[axisY], height);
+            double pixelX = renderer.toCanvasX(vector[axisX], width, minX, maxX, offsetX, zoomFactor);
+            double pixelY = renderer.toCanvasY(vector[axisY], height, minY, maxY, offsetY, zoomFactor);
 
             double dx = pixelX - clickX;
             double dy = pixelY - clickY;
@@ -667,23 +550,7 @@ public class Graph2DView implements IVisualizationView {
         return closestWord;
     }
 
-    private boolean isSameWord(WordNode first, WordNode second) {
-        return first != null
-                && second != null
-                && first.getWord() != null
-                && second.getWord() != null
-                && first.getWord().equalsIgnoreCase(second.getWord());
-    }
 
-    private static class MarkerStyle {
-        private final String color;
-        private final double size;
-
-        private MarkerStyle(String color, double size) {
-            this.color = color;
-            this.size = size;
-        }
-    }
 }
 
 

@@ -1,5 +1,7 @@
 package model.distance;
 
+import service.VectorMathUtils;
+
 /**
  * Implementation of Cosine distance strategy.
  * Cosine similarity measures the cosine of the angle between two vectors,
@@ -15,9 +17,9 @@ public class CosineDistance implements DistanceStrategy {
         if (vectorA.length != vectorB.length) {
             throw new IllegalArgumentException("Vectors must have the same length");
         }
-        double dot = dotProduct(vectorA, vectorB);
-        double normA = norm(vectorA);
-        double normB = norm(vectorB);
+        double dot = VectorMathUtils.calculateDotProduct(vectorA, vectorB);
+        double normA = VectorMathUtils.calculateVectorNorm(vectorA);
+        double normB = VectorMathUtils.calculateVectorNorm(vectorB);
         if (normA == 0.0 || normB == 0.0) {
             // If either vector is zero, distance is maximum (1.0)
             return 1.0;
@@ -28,19 +30,4 @@ public class CosineDistance implements DistanceStrategy {
         return 1.0 - similarity;
     }
 
-    private double dotProduct(double[] a, double[] b) {
-        double sum = 0.0;
-        for (int i = 0; i < a.length; i++) {
-            sum += a[i] * b[i];
-        }
-        return sum;
-    }
-
-    private double norm(double[] v) {
-        double sum = 0.0;
-        for (double val : v) {
-            sum += val * val;
-        }
-        return Math.sqrt(sum);
-    }
 }

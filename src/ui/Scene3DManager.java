@@ -10,12 +10,14 @@ import javafx.scene.control.Tooltip;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.Pane;
 import javafx.scene.paint.Color;
-import javafx.scene.paint.PhongMaterial;
-import javafx.scene.shape.Cylinder;
 import javafx.scene.shape.Sphere;
 import javafx.scene.transform.Rotate;
 import javafx.scene.transform.Translate;
 import model.WordNode;
+import ui.threed.CompositeCluster3D;
+import ui.threed.ConnectionLeaf3D;
+import ui.threed.TextLabel3D;
+import ui.threed.WordLeaf3D;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -49,7 +51,12 @@ public class Scene3DManager implements IVisualizationView {
     private static final double PROBE_CONNECTION_WIDTH = 0.7;
     private static final double MATH_CONNECTION_WIDTH = 1.0;
 
-    private static final Color BASE_COLOR = Color.BLACK;
+    // Click-vs-drag threshold: movements below this distance are treated as clicks.
+    // Prevents drag release from triggering empty-click selection clearing.
+    private static final double DRAG_THRESHOLD_PIXELS = 2.0;
+
+    // Base points use blue for clear contrast on the dark background.
+    private static final Color BASE_COLOR = Color.DODGERBLUE;
     private static final Color MATH_PATH_COLOR = Color.MAGENTA;
     private static final Color MATH_RESULT_COLOR = Color.DODGERBLUE;
     private static final Color GROUP_COLOR = Color.PURPLE;
@@ -59,8 +66,8 @@ public class Scene3DManager implements IVisualizationView {
     private static final Color PROBE_CONNECTION_COLOR = Color.DARKGRAY;
 
     private static final double THREE_D_NEAREST_Z = -200.0;
-    private static final double THREE_D_FARTHEST_Z = -100000.0;
-    private static final double THREE_D_DEFAULT_CAMERA_Z = -2500.0;
+    private static final double THREE_D_FARTHEST_Z = -5000.0;
+    private static final double THREE_D_DEFAULT_CAMERA_Z = -1200.0;
 
     private final Pane rootPane;
     private final SubScene subScene;
@@ -71,8 +78,11 @@ public class Scene3DManager implements IVisualizationView {
     private double threeDCameraZ = THREE_D_DEFAULT_CAMERA_Z;
     private double anchorX;
     private double anchorY;
-    private Rotate rotateX;
-    private Rotate rotateY;
+    private double pressX;
+    private double pressY;
+    private final Rotate rotateX = new Rotate(0, Rotate.X_AXIS);
+    private final Rotate rotateY = new Rotate(0, Rotate.Y_AXIS);
+    private boolean isDragging;
 
     private List<WordNode> currentWords;
     private int[] currentAxes;
@@ -85,8 +95,6 @@ public class Scene3DManager implements IVisualizationView {
     private WordNode mathResultWord;
     private Set<WordNode> selectedGroup;
 
-    private boolean lastPressedWithShift;
-
     public Scene3DManager() {
         this.rootPane = new Pane();
         this.pointClickListener = ignoredWord -> {
@@ -95,6 +103,11 @@ public class Scene3DManager implements IVisualizationView {
         this.currentAxes = new int[]{0, 1, 2};
         this.probeNeighbors = new ArrayList<>();
         this.selectedGroup = new HashSet<>();
+        this.pressX = 0;
+        this.pressY = 0;
+        this.isDragging = false;
+
+        // Rotation transforms are final fields so camera angle persists across rebuilds.
 
         Group initialRoot = new Group();
         this.subScene = new SubScene(initialRoot, 1, 1, true, SceneAntialiasing.BALANCED);
@@ -102,13 +115,10 @@ public class Scene3DManager implements IVisualizationView {
         this.subScene.heightProperty().bind(rootPane.heightProperty());
         this.subScene.setFill(Color.web("#111111"));
 
-        // Capture anchor coordinates at SubScene level so clicks on spheres cannot desync drag state.
+        // Wire mouse interactions with proper click-vs-drag detection like the 2D view.
         this.subScene.addEventFilter(MouseEvent.MOUSE_PRESSED, this::handleSubSceneMousePressed);
-        this.subScene.setOnMouseClicked(event -> {
-            if (!(event.getTarget() instanceof Sphere) && pointClickListener != null) {
-                pointClickListener.accept(null);
-            }
-        });
+        this.subScene.addEventFilter(MouseEvent.MOUSE_DRAGGED, this::handleSubSceneMouseDragged);
+        this.subScene.addEventFilter(MouseEvent.MOUSE_RELEASED, this::handleSubSceneMouseReleased);
 
         this.threeDCamera = new PerspectiveCamera(true);
         this.threeDCamera.setNearClip(0.1);
@@ -148,11 +158,25 @@ public class Scene3DManager implements IVisualizationView {
         rebuildPointCloud();
     }
 
+    /**
+     * Clears every active visual selection layer in the 3D view.
+     */
+    @Override
+    public void clearVisualSelection() {
+        this.selectedWord = null;
+        this.probeSource = null;
+        this.probeNeighbors.clear();
+        this.mathPathWords = null;
+        this.mathResultWord = null;
+        this.selectedGroup.clear();
+        rebuildPointCloud();
+    }
+
     @Override
     public void showNearestNeighbors(WordNode source, List<WordNode> neighbors) {
         this.probeSource = source;
         this.probeNeighbors = neighbors == null ? new ArrayList<>() : new ArrayList<>(neighbors);
-        this.selectedWord = null;
+        this.selectedWord = source;
         this.mathPathWords = null;
         this.mathResultWord = null;
         rebuildPointCloud();
@@ -192,10 +216,6 @@ public class Scene3DManager implements IVisualizationView {
      * Rotates the 3D cloud around X and Y axes.
      */
     public void rotate(double deltaX, double deltaY) {
-        if (rotateX == null || rotateY == null) {
-            return;
-        }
-
         rotateX.setAngle(rotateX.getAngle() - deltaY * 0.5);
         rotateY.setAngle(rotateY.getAngle() + deltaX * 0.5);
     }
@@ -228,13 +248,13 @@ public class Scene3DManager implements IVisualizationView {
         CompositeCluster3D baseWordsCluster = new CompositeCluster3D();
         CompositeCluster3D highlightCluster = new CompositeCluster3D();
         CompositeCluster3D pathCluster = new CompositeCluster3D();
+        CompositeCluster3D labelCluster = new CompositeCluster3D();
 
         rootCluster.add(baseWordsCluster);
         rootCluster.add(pathCluster);
         rootCluster.add(highlightCluster);
+        rootCluster.add(labelCluster);
 
-        rotateX = new Rotate(0, Rotate.X_AXIS);
-        rotateY = new Rotate(0, Rotate.Y_AXIS);
 
         double totalX = 0.0;
         double totalY = 0.0;
@@ -265,7 +285,7 @@ public class Scene3DManager implements IVisualizationView {
                     pointZ,
                     style.color(),
                     style.radius(),
-                    this::handleWordLeafClicked,
+                    null,
                     this::handleWordLeafPressed
             );
 
@@ -283,20 +303,42 @@ public class Scene3DManager implements IVisualizationView {
 
         addMathPathConnections(pathCluster, pointByWord);
         addProbeConnections(highlightCluster, pointByWord);
+        addTextLabels(labelCluster, pointByWord);
 
         Group pointCloudRoot = new Group();
         rootCluster.attachTo(pointCloudRoot);
 
         if (renderedPointCount > 0) {
-            double averageX = totalX / renderedPointCount;
-            double averageY = totalY / renderedPointCount;
-            double averageZ = totalZ / renderedPointCount;
+            double centerX = totalX / renderedPointCount;
+            double centerY = totalY / renderedPointCount;
+            double centerZ = totalZ / renderedPointCount;
+
+            Point3D focusPoint = null;
+            if (selectedWord != null) {
+                focusPoint = pointByWord.get(normalizeWord(selectedWord));
+            } else if (probeSource != null) {
+                focusPoint = pointByWord.get(normalizeWord(probeSource));
+            } else if (mathResultWord != null) {
+                focusPoint = pointByWord.get(normalizeWord(mathResultWord));
+            } else if (mathPathWords != null && !mathPathWords.isEmpty()) {
+                focusPoint = pointByWord.get(normalizeWord(mathPathWords.get(mathPathWords.size() - 1)));
+            }
+
+            if (focusPoint != null) {
+                centerX = focusPoint.getX();
+                centerY = focusPoint.getY();
+                centerZ = focusPoint.getZ();
+            }
+
+            // Keep transform order stable so orbit behavior remains centered on the chosen target.
+            pointCloudRoot.getTransforms().clear();
             pointCloudRoot.getTransforms().addAll(
-                    new Translate(-averageX, -averageY, -averageZ),
                     rotateX,
-                    rotateY
+                    rotateY,
+                    new Translate(-centerX, -centerY, -centerZ)
             );
         } else {
+            pointCloudRoot.getTransforms().clear();
             pointCloudRoot.getTransforms().addAll(rotateX, rotateY);
         }
 
@@ -348,35 +390,196 @@ public class Scene3DManager implements IVisualizationView {
         }
     }
 
+    /**
+     * Adds persistent 3D text labels for selected, probe, and math path words.
+     * Labels appear offset from word points so they don't obscure the points themselves.
+     */
+    private void addTextLabels(CompositeCluster3D labelCluster, Map<String, Point3D> pointByWord) {
+        // Label selected/focused word in RED
+        if (selectedWord != null && selectedWord.getWord() != null) {
+            Point3D point = pointByWord.get(normalizeWord(selectedWord));
+            if (point != null) {
+                labelCluster.add(new TextLabel3D(selectedWord.getWord(), point, Color.RED));
+            }
+        }
+
+        // Label probe source word in ORANGE
+        if (probeSource != null && probeSource.getWord() != null) {
+            Point3D point = pointByWord.get(normalizeWord(probeSource));
+            if (point != null) {
+                labelCluster.add(new TextLabel3D(probeSource.getWord(), point, Color.ORANGE));
+            }
+        }
+
+        // Label probe neighbor words in GREEN
+        if (probeNeighbors != null && !probeNeighbors.isEmpty()) {
+            for (WordNode neighbor : probeNeighbors) {
+                if (neighbor != null && neighbor.getWord() != null) {
+                    Point3D point = pointByWord.get(normalizeWord(neighbor));
+                    if (point != null) {
+                        labelCluster.add(new TextLabel3D(neighbor.getWord(), point, Color.GREEN));
+                    }
+                }
+            }
+        }
+
+        // Label math path words in MAGENTA
+        if (mathPathWords != null && !mathPathWords.isEmpty()) {
+            for (WordNode pathWord : mathPathWords) {
+                if (pathWord != null && pathWord.getWord() != null) {
+                    Point3D point = pointByWord.get(normalizeWord(pathWord));
+                    if (point != null) {
+                        labelCluster.add(new TextLabel3D(pathWord.getWord(), point, Color.MAGENTA));
+                    }
+                }
+            }
+        }
+
+        // Label math result word in DODGERBLUE
+        if (mathResultWord != null && mathResultWord.getWord() != null) {
+            Point3D point = pointByWord.get(normalizeWord(mathResultWord));
+            if (point != null) {
+                labelCluster.add(new TextLabel3D(mathResultWord.getWord(), point, Color.DODGERBLUE));
+            }
+        }
+    }
+
     private void handleSubSceneMousePressed(MouseEvent event) {
-        // Always refresh anchors so subsequent drag deltas are stable.
+        // Store press anchor in scene coordinates for robust click-vs-drag detection.
+        pressX = event.getSceneX();
+        pressY = event.getSceneY();
+
+        // Initialize drag anchor for smooth rotation deltas.
         anchorX = event.getSceneX();
         anchorY = event.getSceneY();
+        isDragging = false;
+
+        // Handle shift-click for subspace group membership (toggle immediately).
+        if (event.isShiftDown()) {
+            if (event.getTarget() instanceof Sphere) {
+                WordNode clickedWord = findWordNodeFromSphere((Sphere) event.getTarget());
+                if (clickedWord != null) {
+                    if (selectedGroup.stream().anyMatch(node -> node != null && node.isSameWord(clickedWord))) {
+                        selectedGroup.removeIf(node -> node != null && node.isSameWord(clickedWord));
+                    } else {
+                        selectedGroup.add(clickedWord);
+                    }
+                    rebuildPointCloud();
+                    isDragging = true;
+                    event.consume();
+                    return;
+                }
+            }
+        }
+    }
+
+    private void handleSubSceneMouseDragged(MouseEvent event) {
+        if (!event.isPrimaryButtonDown()) {
+            return;
+        }
+
+        // Calculate movement from press point to current position.
+        double deltaX = event.getSceneX() - pressX;
+        double deltaY = event.getSceneY() - pressY;
+        double distanceMoved = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+        // If movement exceeds threshold, it's a drag rotation, not a click.
+        if (distanceMoved >= DRAG_THRESHOLD_PIXELS) {
+            isDragging = true;
+        }
+
+        // Only apply rotation if we've exceeded the drag threshold.
+        if (isDragging) {
+            rotateFromScenePosition(event.getSceneX(), event.getSceneY());
+            event.consume();
+        }
+    }
+
+    private void handleSubSceneMouseReleased(MouseEvent event) {
+        // Calculate total movement from press anchor to release position.
+        double deltaX = event.getSceneX() - pressX;
+        double deltaY = event.getSceneY() - pressY;
+        double distanceMoved = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+        // Only process selection if the distance is below the drag threshold.
+        // This prevents drag release from being treated as empty click.
+        if (distanceMoved < DRAG_THRESHOLD_PIXELS) {
+            if (event.getTarget() instanceof Sphere) {
+                WordNode clickedWord = findWordNodeFromSphere((Sphere) event.getTarget());
+                if (clickedWord != null) {
+                    // A regular click starts standard probe selection and clears any existing subspace group.
+                    selectedGroup.clear();
+                    focusOnWord(clickedWord);
+                    if (pointClickListener != null) {
+                        pointClickListener.accept(clickedWord);
+                    }
+                    event.consume();
+                    return;
+                }
+            }
+
+            // Click on empty area: clear selection.
+            clearVisualSelection();
+            if (pointClickListener != null) {
+                pointClickListener.accept(null);
+            }
+            event.consume();
+        }
+
+        // Reset drag state for next interaction.
+        isDragging = false;
+    }
+
+    /**
+     * Extracts the WordNode associated with a Sphere by searching the current word list.
+     * Returns null if the sphere does not correspond to any word in the visualization.
+     */
+    private WordNode findWordNodeFromSphere(Sphere sphere) {
+        // The sphere's position in 3D space uniquely identifies which word it represents.
+        // We search the current words list for a match based on position and color.
+        // For now, we use a heuristic: find word at closest distance to sphere position.
+        double sphereX = sphere.getTranslateX();
+        double sphereY = sphere.getTranslateY();
+        double sphereZ = sphere.getTranslateZ();
+
+        double minDistance = Double.MAX_VALUE;
+        WordNode closestWord = null;
+
+        for (WordNode word : currentWords) {
+            if (!hasUsableThreeDimensionalPcaCoordinates(word, currentAxes[0], currentAxes[1], currentAxes[2])) {
+                continue;
+            }
+
+            double[] vector = word.getPcaVector();
+            double wordX = vector[currentAxes[0]] * THREE_D_SCALE_FACTOR;
+            double wordY = vector[currentAxes[1]] * THREE_D_SCALE_FACTOR;
+            double wordZ = vector[currentAxes[2]] * THREE_D_SCALE_FACTOR;
+
+            double distance = Math.sqrt(
+                    Math.pow(wordX - sphereX, 2) +
+                            Math.pow(wordY - sphereY, 2) +
+                            Math.pow(wordZ - sphereZ, 2)
+            );
+
+            if (distance < minDistance) {
+                minDistance = distance;
+                closestWord = word;
+            }
+        }
+
+        return closestWord;
     }
 
     private void handleWordLeafPressed(MouseEvent event) {
-        // Keep drag anchors synchronized even when press starts directly on a sphere.
-        lastPressedWithShift = event.isShiftDown();
-        setDragAnchor(event.getSceneX(), event.getSceneY());
-    }
+        // Store press position for click-vs-drag detection.
+        pressX = event.getSceneX();
+        pressY = event.getSceneY();
+        isDragging = false;
 
-    private void handleWordLeafClicked(WordNode wordNode) {
-        if (wordNode == null) {
-            return;
-        }
-
-        if (lastPressedWithShift) {
-            if (selectedGroup.stream().anyMatch(existing -> existing != null && existing.isSameWord(wordNode))) {
-                selectedGroup.removeIf(existing -> existing != null && existing.isSameWord(wordNode));
-            } else {
-                selectedGroup.add(wordNode);
-            }
-            rebuildPointCloud();
-            return;
-        }
-
-        selectedGroup.clear();
-        pointClickListener.accept(wordNode);
+        // Store drag anchor for rotation updates.
+        anchorX = event.getSceneX();
+        anchorY = event.getSceneY();
+        event.consume();
     }
 
     private Marker3DStyle resolveMarkerStyle(WordNode wordNode) {
@@ -456,143 +659,6 @@ public class Scene3DManager implements IVisualizationView {
         return wordNode.getWord();
     }
 
-    /**
-     * Composite contract for all 3D scene components.
-     */
-    public interface IComponent3D {
-        void attachTo(Group parent);
-    }
-
-    /**
-     * Composite container that delegates attachment to child components.
-     */
-    public static class CompositeCluster3D implements IComponent3D {
-        private final List<IComponent3D> children = new ArrayList<>();
-
-        public void add(IComponent3D component) {
-            if (component != null) {
-                children.add(component);
-            }
-        }
-
-        @Override
-        public void attachTo(Group parent) {
-            for (IComponent3D child : children) {
-                child.attachTo(parent);
-            }
-        }
-    }
-
-    /**
-     * Leaf component for rendering a single word point.
-     */
-    public static class WordLeaf3D implements IComponent3D {
-        private final WordNode node;
-        private final double x;
-        private final double y;
-        private final double z;
-        private final Color color;
-        private final double radius;
-        private final Consumer<WordNode> onClick;
-        private final Consumer<MouseEvent> onPress;
-
-        public WordLeaf3D(
-                WordNode node,
-                double x,
-                double y,
-                double z,
-                Color color,
-                double radius,
-                Consumer<WordNode> onClick,
-                Consumer<MouseEvent> onPress
-        ) {
-            this.node = node;
-            this.x = x;
-            this.y = y;
-            this.z = z;
-            this.color = color;
-            this.radius = radius;
-            this.onClick = onClick;
-            this.onPress = onPress;
-        }
-
-        @Override
-        public void attachTo(Group parent) {
-            Sphere sphere = new Sphere(radius, THREE_D_SPHERE_DIVISIONS);
-            sphere.setFocusTraversable(false);
-            sphere.setMaterial(new PhongMaterial(color));
-            sphere.setTranslateX(x);
-            sphere.setTranslateY(y);
-            sphere.setTranslateZ(z);
-            Tooltip.install(sphere, new Tooltip(node == null ? "<unnamed>" : node.getWord()));
-
-            // Keep press updates available for drag anchor synchronization.
-            sphere.setOnMousePressed(event -> {
-                if (onPress != null) {
-                    onPress.accept(event);
-                }
-            });
-
-            sphere.setOnMouseClicked(event -> {
-                if (onClick != null) {
-                    onClick.accept(node);
-                }
-                event.consume();
-            });
-
-            parent.getChildren().add(sphere);
-        }
-    }
-
-    /**
-     * Leaf component for rendering a cylindrical connection between two points.
-     */
-    public static class ConnectionLeaf3D implements IComponent3D {
-        private final Point3D p1;
-        private final Point3D p2;
-        private final Color color;
-        private final double width;
-
-        public ConnectionLeaf3D(Point3D p1, Point3D p2, Color color, double width) {
-            this.p1 = p1;
-            this.p2 = p2;
-            this.color = color;
-            this.width = width;
-        }
-
-        @Override
-        public void attachTo(Group parent) {
-            if (p1 == null || p2 == null) {
-                return;
-            }
-
-            Point3D diff = p2.subtract(p1);
-            double distance = diff.magnitude();
-            if (distance <= 1e-6) {
-                return;
-            }
-
-            Cylinder cylinder = new Cylinder(width, distance);
-            cylinder.setMaterial(new PhongMaterial(color));
-            cylinder.setFocusTraversable(false);
-
-            Point3D yAxis = new Point3D(0, 1, 0);
-            Point3D midpoint = p1.midpoint(p2);
-            Point3D axis = yAxis.crossProduct(diff);
-            double dot = yAxis.normalize().dotProduct(diff.normalize());
-            double clampedDot = Math.max(-1.0, Math.min(1.0, dot));
-            double angle = Math.toDegrees(Math.acos(clampedDot));
-
-            Translate moveToMidpoint = new Translate(midpoint.getX(), midpoint.getY(), midpoint.getZ());
-            if (axis.magnitude() <= 1e-6) {
-                axis = new Point3D(1, 0, 0);
-            }
-            Rotate rotateToVector = new Rotate(angle, axis);
-
-            cylinder.getTransforms().addAll(moveToMidpoint, rotateToVector);
-            parent.getChildren().add(cylinder);
-        }
-    }
 
     private record Marker3DStyle(Color color, double radius, boolean highlighted) {
     }

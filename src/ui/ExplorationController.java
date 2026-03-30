@@ -63,7 +63,15 @@ public class ExplorationController {
             return;
         }
 
+        // Clear old probe/math/group state before applying new focus.
         IVisualizationView activeView = activeViewSupplier.get();
+        if (activeView != null) {
+            activeView.clearVisualSelection();
+        }
+
+        // Clear measurement state so old measurement UI does not remain.
+        interactionModel.clearMeasurementState();
+
         if (activeView != null) {
             activeView.focusOnWord(foundWord);
         }
@@ -127,9 +135,7 @@ public class ExplorationController {
     public void handleWordClick(WordNode clickedNode) {
         IVisualizationView activeView = activeViewSupplier.get();
         if (clickedNode == null || clickedNode.getWord() == null || clickedNode.getWord().isBlank()) {
-            if (activeView != null) {
-                activeView.focusOnWord(null);
-            }
+            clearSelectionState(activeView);
             return;
         }
 
@@ -153,7 +159,7 @@ public class ExplorationController {
             controlPanelView.setSelectedWordText("Selected: " + getDisplayWord(interactionModel.getSourceNode()));
             controlPanelView.setMeasureButtonDisabled(!interactionModel.isMeasureButtonEnabled());
 
-            if (!interactionModel.isMeasuringMode() && clickedNode != null) {
+            if (!interactionModel.isMeasuringMode()) {
                 controlPanelView.setDistanceResultText("");
                 String selectedMetric = controlPanelView.getDistanceMetric();
                 int kValue = controlPanelView.getKValue();
@@ -200,8 +206,25 @@ public class ExplorationController {
     public void resetVisualFocusState() {
         IVisualizationView activeView = activeViewSupplier.get();
         if (activeView != null) {
-            activeView.focusOnWord(null);
+            activeView.clearVisualSelection();
         }
+    }
+
+    private void clearSelectionState(IVisualizationView activeView) {
+        interactionModel.clearMeasurementState();
+        interactionModel.setActiveTargetNode(null);
+        interactionModel.setActiveNeighborNodes(List.of());
+
+        if (activeView != null) {
+            activeView.clearVisualSelection();
+        }
+
+        controlPanelView.clearResults();
+        controlPanelView.setResultsTitle("Showing: Nearest Neighbors");
+        controlPanelView.setSelectedWordText("Selected: None");
+        controlPanelView.setDistanceResultText("");
+        controlPanelView.setMeasureButtonDisabled(!interactionModel.isMeasureButtonEnabled());
+        controlPanelView.setStatusMessage("Selection cleared.");
     }
 
     private DistanceStrategy createSelectedDistanceStrategy() {

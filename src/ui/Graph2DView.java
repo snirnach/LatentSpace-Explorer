@@ -139,6 +139,22 @@ public class Graph2DView implements IVisualizationView {
     }
 
     /**
+     * Clears every visual selection layer so no stale highlights remain on screen.
+     */
+    @Override
+    public void clearVisualSelection() {
+        this.focusedWord = null;
+        this.probeSource = null;
+        this.probeNeighbors = new ArrayList<>();
+        this.mathPathWords = null;
+        this.mathResultWord = null;
+        this.selectedGroup.clear();
+        this.highlightedWordKeys = Set.of();
+        this.sourceWordKey = null;
+        redraw();
+    }
+
+    /**
      * Updates highlighted words rendered in emphasized style.
      */
     public void setHighlightedWords(Collection<WordNode> highlightedWords) {
@@ -386,7 +402,7 @@ public class Graph2DView implements IVisualizationView {
                 event.consume();
             } else {
                 // Click on empty area: clear selection.
-                focusOnWord(null);
+                clearVisualSelection();
                 if (onWordClicked != null) {
                     onWordClicked.accept(null);
                 }

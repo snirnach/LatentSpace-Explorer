@@ -33,6 +33,11 @@ public interface IVisualizationView {
     void focusOnWord(WordNode word);
 
     /**
+     * Clears all active visual selection state (focus, probe, math path, and group highlights).
+     */
+    void clearVisualSelection();
+
+    /**
      * Displays the nearest neighbors probe visualization for a source word
      * with connections/highlights to its neighbors.
      */

@@ -86,11 +86,11 @@ public class Graph2DRenderer {
 
             WordNode previous = null;
             for (WordNode pathWord : mathPathWords) {
-                if (!isWordPlottable(pathWord, axisX, axisY)) {
+                if (pathWord == null || !pathWord.hasValidPcaCoordinates(axisX, axisY)) {
                     continue;
                 }
 
-                if (isWordPlottable(previous, axisX, axisY)) {
+                if (previous != null && previous.hasValidPcaCoordinates(axisX, axisY)) {
                     double[] previousVector = previous.getPcaVector();
                     double[] currentVector = pathWord.getPcaVector();
                     double x1 = toCanvasX(previousVector[axisX], width, range.minX, range.maxX, offsetX, zoomFactor);
@@ -103,7 +103,10 @@ public class Graph2DRenderer {
                 previous = pathWord;
             }
 
-            if (isWordPlottable(previous, axisX, axisY) && isWordPlottable(mathResultWord, axisX, axisY)) {
+            if (previous != null
+                    && previous.hasValidPcaCoordinates(axisX, axisY)
+                    && mathResultWord != null
+                    && mathResultWord.hasValidPcaCoordinates(axisX, axisY)) {
                 double[] previousVector = previous.getPcaVector();
                 double[] resultVector = mathResultWord.getPcaVector();
                 double x1 = toCanvasX(previousVector[axisX], width, range.minX, range.maxX, offsetX, zoomFactor);
@@ -116,7 +119,7 @@ public class Graph2DRenderer {
         }
 
         // Draw probe connection lines before marker rendering.
-        if (!safeProbeNeighbors.isEmpty() && isWordPlottable(probeSource, axisX, axisY)) {
+        if (!safeProbeNeighbors.isEmpty() && probeSource != null && probeSource.hasValidPcaCoordinates(axisX, axisY)) {
             double[] sourceVector = probeSource.getPcaVector();
             double sourceX = toCanvasX(sourceVector[axisX], width, range.minX, range.maxX, offsetX, zoomFactor);
             double sourceY = toCanvasY(sourceVector[axisY], height, range.minY, range.maxY, offsetY, zoomFactor);
@@ -125,7 +128,7 @@ public class Graph2DRenderer {
             gc.setLineWidth(PROBE_LINE_WIDTH);
 
             for (WordNode neighbor : safeProbeNeighbors) {
-                if (!isWordPlottable(neighbor, axisX, axisY)) {
+                if (neighbor == null || !neighbor.hasValidPcaCoordinates(axisX, axisY)) {
                     continue;
                 }
 
@@ -138,7 +141,7 @@ public class Graph2DRenderer {
         }
 
         for (WordNode wordNode : words) {
-            if (!isWordPlottable(wordNode, axisX, axisY)) {
+            if (wordNode == null || !wordNode.hasValidPcaCoordinates(axisX, axisY)) {
                 continue;
             }
 
@@ -257,7 +260,7 @@ public class Graph2DRenderer {
         DataRange range = new DataRange();
 
         for (WordNode wordNode : words) {
-            if (!isWordPlottable(wordNode, axisX, axisY)) {
+            if (wordNode == null || !wordNode.hasValidPcaCoordinates(axisX, axisY)) {
                 continue;
             }
 
@@ -287,21 +290,6 @@ public class Graph2DRenderer {
         }
 
         return range;
-    }
-
-    private boolean isWordPlottable(WordNode wordNode, int axisX, int axisY) {
-        if (wordNode == null || wordNode.getPcaVector() == null || wordNode.getWord() == null) {
-            return false;
-        }
-
-        int neededLength = Math.max(axisX, axisY) + 1;
-        if (wordNode.getPcaVector().length < neededLength) {
-            return false;
-        }
-
-        double x = wordNode.getPcaVector()[axisX];
-        double y = wordNode.getPcaVector()[axisY];
-        return Double.isFinite(x) && Double.isFinite(y);
     }
 
 

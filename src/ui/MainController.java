@@ -128,31 +128,16 @@ public class  MainController {
         return currentView == view3D;
     }
 
-    private boolean hasUsablePcaCoordinates(WordNode wordNode, int xIndex, int yIndex) {
-        if (wordNode == null || wordNode.getPcaVector() == null) {
-            return false;
-        }
-
-        int neededLength = Math.max(xIndex, yIndex) + 1;
-        if (wordNode.getPcaVector().length < neededLength) {
-            return false;
-        }
-
-        double x = wordNode.getPcaVector()[xIndex];
-        double y = wordNode.getPcaVector()[yIndex];
-        return Double.isFinite(x) && Double.isFinite(y);
-    }
-
     private List<WordNode> buildHighlightedNodes(int xIndex, int yIndex) {
         List<WordNode> highlightedNodes = new ArrayList<>();
 
         WordNode targetNode = interactionModel.getActiveTargetNode();
-        if (hasUsablePcaCoordinates(targetNode, xIndex, yIndex)) {
+        if (targetNode != null && targetNode.hasValidPcaCoordinates(xIndex, yIndex)) {
             highlightedNodes.add(targetNode);
         }
 
         for (WordNode neighbor : interactionModel.getActiveNeighborNodes()) {
-            if (hasUsablePcaCoordinates(neighbor, xIndex, yIndex)) {
+            if (neighbor != null && neighbor.hasValidPcaCoordinates(xIndex, yIndex)) {
                 highlightedNodes.add(neighbor);
             }
         }

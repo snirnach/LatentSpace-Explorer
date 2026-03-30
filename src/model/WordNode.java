@@ -54,4 +54,26 @@ public class WordNode {
                 && !other.word.isBlank()
                 && this.word.equalsIgnoreCase(other.word);
     }
+
+    /**
+     * Checks if the word has valid PCA coordinates for the requested axes.
+     * Supports checking any number of dimensions (e.g., 2D or 3D).
+     *
+     * @param axes the PCA indices to check (e.g., axisX, axisY, axisZ)
+     * @return true if the word has valid finite values for all requested axes
+     */
+    public boolean hasValidPcaCoordinates(int... axes) {
+        if (this.word == null || this.word.isBlank() || this.pcaVector == null) {
+            return false;
+        }
+        for (int axis : axes) {
+            if (axis < 0 || axis >= this.pcaVector.length) {
+                return false;
+            }
+            if (!Double.isFinite(this.pcaVector[axis])) {
+                return false;
+            }
+        }
+        return true;
+    }
 }

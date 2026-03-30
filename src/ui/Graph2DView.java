@@ -240,7 +240,7 @@ public class Graph2DView implements IVisualizationView {
 
             if (equationWords != null) {
                 for (WordNode wordNode : equationWords) {
-                    if (!isWordPlottable(wordNode)) {
+                    if (wordNode == null || !wordNode.hasValidPcaCoordinates(axisX, axisY)) {
                         continue;
                     }
                     double[] vector = wordNode.getPcaVector();
@@ -250,7 +250,7 @@ public class Graph2DView implements IVisualizationView {
                 }
             }
 
-            if (isWordPlottable(closestResult)) {
+            if (closestResult != null && closestResult.hasValidPcaCoordinates(axisX, axisY)) {
                 double[] resultVector = closestResult.getPcaVector();
                 rawXSum += resultVector[axisX];
                 rawYSum += resultVector[axisY];
@@ -457,7 +457,7 @@ public class Graph2DView implements IVisualizationView {
         computeDataRange();
 
         WordNode effectiveFocusedWord = focusedWord;
-        if (effectiveFocusedWord != null && !isWordPlottable(effectiveFocusedWord)) {
+        if (effectiveFocusedWord != null && !effectiveFocusedWord.hasValidPcaCoordinates(axisX, axisY)) {
             effectiveFocusedWord = null;
         }
 
@@ -487,7 +487,7 @@ public class Graph2DView implements IVisualizationView {
         maxY = Double.NEGATIVE_INFINITY;
 
         for (WordNode wordNode : cachedWords) {
-            if (!isWordPlottable(wordNode)) {
+            if (wordNode == null || !wordNode.hasValidPcaCoordinates(axisX, axisY)) {
                 continue;
             }
 
@@ -517,21 +517,6 @@ public class Graph2DView implements IVisualizationView {
         }
     }
 
-    private boolean isWordPlottable(WordNode wordNode) {
-        if (wordNode == null || wordNode.getPcaVector() == null || wordNode.getWord() == null) {
-            return false;
-        }
-
-        int neededLength = Math.max(axisX, axisY) + 1;
-        if (wordNode.getPcaVector().length < neededLength) {
-            return false;
-        }
-
-        double x = wordNode.getPcaVector()[axisX];
-        double y = wordNode.getPcaVector()[axisY];
-        return Double.isFinite(x) && Double.isFinite(y);
-    }
-
     private WordNode findClosestWord(double clickX, double clickY) {
         if (!hasValidRange || cachedWords.isEmpty()) {
             return null;
@@ -545,7 +530,7 @@ public class Graph2DView implements IVisualizationView {
         double closestDistanceSquared = Double.MAX_VALUE;
 
         for (WordNode wordNode : cachedWords) {
-            if (!isWordPlottable(wordNode)) {
+            if (wordNode == null || !wordNode.hasValidPcaCoordinates(axisX, axisY)) {
                 continue;
             }
 

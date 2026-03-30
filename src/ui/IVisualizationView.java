@@ -5,6 +5,7 @@ import model.WordNode;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 /**
@@ -52,5 +53,15 @@ public interface IVisualizationView {
      * Returns the currently selected group of words for subspace analysis.
      */
     java.util.Set<WordNode> getSelectedGroup();
+
+    /**
+     * Sets semantic projection scores used by renderers when a semantic axis index is selected.
+     */
+    void setSemanticScores(List<Map.Entry<String, Double>> projections);
+
+    /**
+     * Sets the two semantic pole words used for explicit visual highlighting.
+     */
+    void setSemanticPoles(WordNode poleA, WordNode poleB);
 }
 

@@ -4,16 +4,14 @@ import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.paint.Color;
 import model.WordNode;
 
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Set;
+import java.util.*;
 
 /**
  * Dedicated canvas renderer for Graph2DView.
  */
 public class Graph2DRenderer {
+
+    public static final int SEMANTIC_AXIS_INDEX = 999;
 
     private static final double BASE_POINT_SIZE = 5.0;
     private static final double HIGHLIGHT_POINT_SIZE = 7.0;
@@ -27,6 +25,10 @@ public class Graph2DRenderer {
     private static final Color PROBE_SOURCE_COLOR = Color.ORANGE;
     private static final Color PROBE_NEIGHBOR_COLOR = Color.GREEN;
     private static final Color FOCUSED_COLOR = Color.RED;
+    private static final Color SEMANTIC_POLE_A_COLOR = Color.GREEN;
+    private static final Color SEMANTIC_POLE_B_COLOR = Color.RED;
+
+    private static final double SEMANTIC_POLE_POINT_SIZE = HIGHLIGHT_POINT_SIZE + 3.0;
 
     private static final double PROBE_LINE_WIDTH = 1.5;
     private static final double MATH_PATH_LINE_WIDTH = 3.0;
@@ -35,6 +37,9 @@ public class Graph2DRenderer {
 
     private Set<String> highlightedWordKeys = Set.of();
     private String sourceWordKey;
+    private final Map<String, Double> semanticScoreByWord = new HashMap<>();
+    private WordNode semanticPoleA;
+    private WordNode semanticPoleB;
 
     public Graph2DRenderer(GraphicsContext gc) {
         this.gc = gc;
@@ -43,6 +48,31 @@ public class Graph2DRenderer {
     public void setHighlightState(Set<String> highlightedWordKeys, String sourceWordKey) {
         this.highlightedWordKeys = highlightedWordKeys == null ? Set.of() : new HashSet<>(highlightedWordKeys);
         this.sourceWordKey = sourceWordKey;
+    }
+
+    /**
+     * Caches semantic projection scores for optional semantic-axis rendering.
+     */
+    public void setSemanticScores(List<Map.Entry<String, Double>> projections) {
+        semanticScoreByWord.clear();
+        if (projections == null) {
+            return;
+        }
+
+        for (Map.Entry<String, Double> entry : projections) {
+            if (entry == null || entry.getKey() == null || entry.getValue() == null) {
+                continue;
+            }
+            semanticScoreByWord.put(entry.getKey().toLowerCase(Locale.ROOT), entry.getValue());
+        }
+    }
+
+    /**
+     * Stores semantic pole words for explicit visual highlighting.
+     */
+    public void setSemanticPoles(WordNode poleA, WordNode poleB) {
+        this.semanticPoleA = poleA;
+        this.semanticPoleB = poleB;
     }
 
     public void render(
@@ -86,68 +116,58 @@ public class Graph2DRenderer {
 
             WordNode previous = null;
             for (WordNode pathWord : mathPathWords) {
-                if (pathWord == null || !pathWord.hasValidPcaCoordinates(axisX, axisY)) {
+                if (!hasCoordinates(pathWord, axisX, axisY)) {
                     continue;
                 }
 
-                if (previous != null && previous.hasValidPcaCoordinates(axisX, axisY)) {
-                    double[] previousVector = previous.getPcaVector();
-                    double[] currentVector = pathWord.getPcaVector();
-                    double x1 = toCanvasX(previousVector[axisX], width, range.minX, range.maxX, offsetX, zoomFactor);
-                    double y1 = toCanvasY(previousVector[axisY], height, range.minY, range.maxY, offsetY, zoomFactor);
-                    double x2 = toCanvasX(currentVector[axisX], width, range.minX, range.maxX, offsetX, zoomFactor);
-                    double y2 = toCanvasY(currentVector[axisY], height, range.minY, range.maxY, offsetY, zoomFactor);
+                if (hasCoordinates(previous, axisX, axisY)) {
+                    double x1 = toCanvasX(getAxisValue(previous, axisX), width, range.minX, range.maxX, offsetX, zoomFactor);
+                    double y1 = toCanvasY(getAxisValue(previous, axisY), height, range.minY, range.maxY, offsetY, zoomFactor);
+                    double x2 = toCanvasX(getAxisValue(pathWord, axisX), width, range.minX, range.maxX, offsetX, zoomFactor);
+                    double y2 = toCanvasY(getAxisValue(pathWord, axisY), height, range.minY, range.maxY, offsetY, zoomFactor);
                     gc.strokeLine(x1, y1, x2, y2);
                 }
 
                 previous = pathWord;
             }
 
-            if (previous != null
-                    && previous.hasValidPcaCoordinates(axisX, axisY)
-                    && mathResultWord != null
-                    && mathResultWord.hasValidPcaCoordinates(axisX, axisY)) {
-                double[] previousVector = previous.getPcaVector();
-                double[] resultVector = mathResultWord.getPcaVector();
-                double x1 = toCanvasX(previousVector[axisX], width, range.minX, range.maxX, offsetX, zoomFactor);
-                double y1 = toCanvasY(previousVector[axisY], height, range.minY, range.maxY, offsetY, zoomFactor);
-                double x2 = toCanvasX(resultVector[axisX], width, range.minX, range.maxX, offsetX, zoomFactor);
-                double y2 = toCanvasY(resultVector[axisY], height, range.minY, range.maxY, offsetY, zoomFactor);
+            if (hasCoordinates(previous, axisX, axisY) && hasCoordinates(mathResultWord, axisX, axisY)) {
+                double x1 = toCanvasX(getAxisValue(previous, axisX), width, range.minX, range.maxX, offsetX, zoomFactor);
+                double y1 = toCanvasY(getAxisValue(previous, axisY), height, range.minY, range.maxY, offsetY, zoomFactor);
+                double x2 = toCanvasX(getAxisValue(mathResultWord, axisX), width, range.minX, range.maxX, offsetX, zoomFactor);
+                double y2 = toCanvasY(getAxisValue(mathResultWord, axisY), height, range.minY, range.maxY, offsetY, zoomFactor);
                 gc.strokeLine(x1, y1, x2, y2);
             }
             gc.restore();
         }
 
         // Draw probe connection lines before marker rendering.
-        if (!safeProbeNeighbors.isEmpty() && probeSource != null && probeSource.hasValidPcaCoordinates(axisX, axisY)) {
-            double[] sourceVector = probeSource.getPcaVector();
-            double sourceX = toCanvasX(sourceVector[axisX], width, range.minX, range.maxX, offsetX, zoomFactor);
-            double sourceY = toCanvasY(sourceVector[axisY], height, range.minY, range.maxY, offsetY, zoomFactor);
+        if (!safeProbeNeighbors.isEmpty() && hasCoordinates(probeSource, axisX, axisY)) {
+            double sourceX = toCanvasX(getAxisValue(probeSource, axisX), width, range.minX, range.maxX, offsetX, zoomFactor);
+            double sourceY = toCanvasY(getAxisValue(probeSource, axisY), height, range.minY, range.maxY, offsetY, zoomFactor);
 
             gc.setStroke(Color.DARKGRAY);
             gc.setLineWidth(PROBE_LINE_WIDTH);
 
             for (WordNode neighbor : safeProbeNeighbors) {
-                if (neighbor == null || !neighbor.hasValidPcaCoordinates(axisX, axisY)) {
+                if (!hasCoordinates(neighbor, axisX, axisY)) {
                     continue;
                 }
 
-                double[] neighborVector = neighbor.getPcaVector();
-                double neighborX = toCanvasX(neighborVector[axisX], width, range.minX, range.maxX, offsetX, zoomFactor);
-                double neighborY = toCanvasY(neighborVector[axisY], height, range.minY, range.maxY, offsetY, zoomFactor);
+                double neighborX = toCanvasX(getAxisValue(neighbor, axisX), width, range.minX, range.maxX, offsetX, zoomFactor);
+                double neighborY = toCanvasY(getAxisValue(neighbor, axisY), height, range.minY, range.maxY, offsetY, zoomFactor);
 
                 gc.strokeLine(sourceX, sourceY, neighborX, neighborY);
             }
         }
 
         for (WordNode wordNode : words) {
-            if (wordNode == null || !wordNode.hasValidPcaCoordinates(axisX, axisY)) {
+            if (!hasCoordinates(wordNode, axisX, axisY)) {
                 continue;
             }
 
-            double[] vector = wordNode.getPcaVector();
-            double pixelX = toCanvasX(vector[axisX], width, range.minX, range.maxX, offsetX, zoomFactor);
-            double pixelY = toCanvasY(vector[axisY], height, range.minY, range.maxY, offsetY, zoomFactor);
+            double pixelX = toCanvasX(getAxisValue(wordNode, axisX), width, range.minX, range.maxX, offsetX, zoomFactor);
+            double pixelY = toCanvasY(getAxisValue(wordNode, axisY), height, range.minY, range.maxY, offsetY, zoomFactor);
 
             boolean isProbeSource = isStrictWordMatch(wordNode, probeSource);
             boolean isProbeNeighbor = safeProbeNeighbors.stream().anyMatch(neighbor -> isStrictWordMatch(wordNode, neighbor));
@@ -156,6 +176,34 @@ public class Graph2DRenderer {
             boolean isMathResultWord = isStrictWordMatch(wordNode, mathResultWord);
             boolean isSelectedGroupWord = safeSelectedGroup.stream()
                     .anyMatch(groupNode -> isStrictWordMatch(groupNode, wordNode));
+            boolean isSemanticPoleA = isStrictWordMatch(wordNode, semanticPoleA);
+            boolean isSemanticPoleB = isStrictWordMatch(wordNode, semanticPoleB);
+
+            if (isSemanticPoleA) {
+                gc.setFill(SEMANTIC_POLE_A_COLOR);
+                gc.fillOval(
+                        pixelX - (SEMANTIC_POLE_POINT_SIZE / 2.0),
+                        pixelY - (SEMANTIC_POLE_POINT_SIZE / 2.0),
+                        SEMANTIC_POLE_POINT_SIZE,
+                        SEMANTIC_POLE_POINT_SIZE
+                );
+                gc.setFill(Color.BLACK);
+                gc.fillText(wordNode.getWord(), pixelX + 8, pixelY - 8);
+                continue;
+            }
+
+            if (isSemanticPoleB) {
+                gc.setFill(SEMANTIC_POLE_B_COLOR);
+                gc.fillOval(
+                        pixelX - (SEMANTIC_POLE_POINT_SIZE / 2.0),
+                        pixelY - (SEMANTIC_POLE_POINT_SIZE / 2.0),
+                        SEMANTIC_POLE_POINT_SIZE,
+                        SEMANTIC_POLE_POINT_SIZE
+                );
+                gc.setFill(Color.BLACK);
+                gc.fillText(wordNode.getWord(), pixelX + 8, pixelY - 8);
+                continue;
+            }
 
             if (isSelectedGroupWord) {
                 gc.setFill(GROUP_COLOR);
@@ -260,13 +308,12 @@ public class Graph2DRenderer {
         DataRange range = new DataRange();
 
         for (WordNode wordNode : words) {
-            if (wordNode == null || !wordNode.hasValidPcaCoordinates(axisX, axisY)) {
+            if (!hasCoordinates(wordNode, axisX, axisY)) {
                 continue;
             }
 
-            double[] vector = wordNode.getPcaVector();
-            double x = vector[axisX];
-            double y = vector[axisY];
+            double x = getAxisValue(wordNode, axisX);
+            double y = getAxisValue(wordNode, axisY);
 
             range.minX = Math.min(range.minX, x);
             range.maxX = Math.max(range.maxX, x);
@@ -290,6 +337,31 @@ public class Graph2DRenderer {
         }
 
         return range;
+    }
+
+    private boolean hasCoordinates(WordNode wordNode, int axisX, int axisY) {
+        return getAxisValueOrNull(wordNode, axisX) != null && getAxisValueOrNull(wordNode, axisY) != null;
+    }
+
+    private double getAxisValue(WordNode wordNode, int axisIndex) {
+        Double value = getAxisValueOrNull(wordNode, axisIndex);
+        return value == null ? 0.0 : value;
+    }
+
+    private Double getAxisValueOrNull(WordNode wordNode, int axisIndex) {
+        if (wordNode == null || wordNode.getWord() == null) {
+            return null;
+        }
+
+        if (axisIndex == SEMANTIC_AXIS_INDEX) {
+            return semanticScoreByWord.get(wordNode.getWord().toLowerCase(Locale.ROOT));
+        }
+
+        if (!wordNode.hasValidPcaCoordinates(axisIndex)) {
+            return null;
+        }
+
+        return wordNode.getPcaVector()[axisIndex];
     }
 
 

@@ -13,6 +13,7 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -54,6 +55,8 @@ public class Graph2DView implements IVisualizationView {
     private List<WordNode> probeNeighbors = new ArrayList<>();
     private List<WordNode> mathPathWords;
     private WordNode mathResultWord;
+    private WordNode semanticPoleA;
+    private WordNode semanticPoleB;
     private Set<WordNode> selectedGroup = new HashSet<>();
 
     private boolean hasValidRange;
@@ -61,6 +64,7 @@ public class Graph2DView implements IVisualizationView {
     private double maxX;
     private double minY;
     private double maxY;
+    private final Map<String, Double> semanticScoreByWord = new java.util.HashMap<>();
 
     public Graph2DView() {
         this.centerWrapper = new Pane();
@@ -122,15 +126,16 @@ public class Graph2DView implements IVisualizationView {
             return;
         }
 
-        double[] vector = word.getPcaVector();
-        if (vector == null || vector.length <= Math.max(axisX, axisY)) {
+        Double axisXValue = getAxisValueOrNull(word, axisX);
+        Double axisYValue = getAxisValueOrNull(word, axisY);
+        if (axisXValue == null || axisYValue == null) {
             redraw();
             return;
         }
 
         // Calculate the raw un-panned pixel position for the active axes.
-        double rawPixelX = renderer.toCanvasX(vector[axisX], canvas.getWidth(), minX, maxX, 0.0, zoomFactor);
-        double rawPixelY = renderer.toCanvasY(vector[axisY], canvas.getHeight(), minY, maxY, 0.0, zoomFactor);
+        double rawPixelX = renderer.toCanvasX(axisXValue, canvas.getWidth(), minX, maxX, 0.0, zoomFactor);
+        double rawPixelY = renderer.toCanvasY(axisYValue, canvas.getHeight(), minY, maxY, 0.0, zoomFactor);
 
         // Recenter by offsetting the raw pixel position into the canvas center.
         this.offsetX = (canvas.getWidth() / 2.0) - rawPixelX;
@@ -240,20 +245,18 @@ public class Graph2DView implements IVisualizationView {
 
             if (equationWords != null) {
                 for (WordNode wordNode : equationWords) {
-                    if (wordNode == null || !wordNode.hasValidPcaCoordinates(axisX, axisY)) {
+                    if (!hasAxisCoordinates(wordNode, axisX, axisY)) {
                         continue;
                     }
-                    double[] vector = wordNode.getPcaVector();
-                    rawXSum += vector[axisX];
-                    rawYSum += vector[axisY];
+                    rawXSum += getAxisValue(wordNode, axisX);
+                    rawYSum += getAxisValue(wordNode, axisY);
                     nodeCount++;
                 }
             }
 
-            if (closestResult != null && closestResult.hasValidPcaCoordinates(axisX, axisY)) {
-                double[] resultVector = closestResult.getPcaVector();
-                rawXSum += resultVector[axisX];
-                rawYSum += resultVector[axisY];
+            if (hasAxisCoordinates(closestResult, axisX, axisY)) {
+                rawXSum += getAxisValue(closestResult, axisX);
+                rawYSum += getAxisValue(closestResult, axisY);
                 nodeCount++;
             }
 
@@ -279,6 +282,30 @@ public class Graph2DView implements IVisualizationView {
     @Override
     public Set<WordNode> getSelectedGroup() {
         return new HashSet<>(selectedGroup);
+    }
+
+    @Override
+    public void setSemanticScores(List<Map.Entry<String, Double>> projections) {
+        semanticScoreByWord.clear();
+        renderer.setSemanticScores(projections);
+
+        if (projections == null) {
+            return;
+        }
+
+        for (Map.Entry<String, Double> entry : projections) {
+            if (entry == null || entry.getKey() == null || entry.getValue() == null) {
+                continue;
+            }
+            semanticScoreByWord.put(entry.getKey().toLowerCase(Locale.ROOT), entry.getValue());
+        }
+    }
+
+    @Override
+    public void setSemanticPoles(WordNode poleA, WordNode poleB) {
+        this.semanticPoleA = poleA;
+        this.semanticPoleB = poleB;
+        renderer.setSemanticPoles(poleA, poleB);
     }
 
     /**
@@ -457,7 +484,7 @@ public class Graph2DView implements IVisualizationView {
         computeDataRange();
 
         WordNode effectiveFocusedWord = focusedWord;
-        if (effectiveFocusedWord != null && !effectiveFocusedWord.hasValidPcaCoordinates(axisX, axisY)) {
+        if (effectiveFocusedWord != null && !hasAxisCoordinates(effectiveFocusedWord, axisX, axisY)) {
             effectiveFocusedWord = null;
         }
 
@@ -487,13 +514,12 @@ public class Graph2DView implements IVisualizationView {
         maxY = Double.NEGATIVE_INFINITY;
 
         for (WordNode wordNode : cachedWords) {
-            if (wordNode == null || !wordNode.hasValidPcaCoordinates(axisX, axisY)) {
+            if (!hasAxisCoordinates(wordNode, axisX, axisY)) {
                 continue;
             }
 
-            double[] vector = wordNode.getPcaVector();
-            double x = vector[axisX];
-            double y = vector[axisY];
+            double x = getAxisValue(wordNode, axisX);
+            double y = getAxisValue(wordNode, axisY);
 
             minX = Math.min(minX, x);
             maxX = Math.max(maxX, x);
@@ -530,13 +556,12 @@ public class Graph2DView implements IVisualizationView {
         double closestDistanceSquared = Double.MAX_VALUE;
 
         for (WordNode wordNode : cachedWords) {
-            if (wordNode == null || !wordNode.hasValidPcaCoordinates(axisX, axisY)) {
+            if (!hasAxisCoordinates(wordNode, axisX, axisY)) {
                 continue;
             }
 
-            double[] vector = wordNode.getPcaVector();
-            double pixelX = renderer.toCanvasX(vector[axisX], width, minX, maxX, offsetX, zoomFactor);
-            double pixelY = renderer.toCanvasY(vector[axisY], height, minY, maxY, offsetY, zoomFactor);
+            double pixelX = renderer.toCanvasX(getAxisValue(wordNode, axisX), width, minX, maxX, offsetX, zoomFactor);
+            double pixelY = renderer.toCanvasY(getAxisValue(wordNode, axisY), height, minY, maxY, offsetY, zoomFactor);
 
             double dx = pixelX - clickX;
             double dy = pixelY - clickY;
@@ -549,6 +574,31 @@ public class Graph2DView implements IVisualizationView {
         }
 
         return closestWord;
+    }
+
+    private boolean hasAxisCoordinates(WordNode wordNode, int xAxis, int yAxis) {
+        return getAxisValueOrNull(wordNode, xAxis) != null && getAxisValueOrNull(wordNode, yAxis) != null;
+    }
+
+    private double getAxisValue(WordNode wordNode, int axisIndex) {
+        Double value = getAxisValueOrNull(wordNode, axisIndex);
+        return value == null ? 0.0 : value;
+    }
+
+    private Double getAxisValueOrNull(WordNode wordNode, int axisIndex) {
+        if (wordNode == null || wordNode.getWord() == null) {
+            return null;
+        }
+
+        if (axisIndex == Graph2DRenderer.SEMANTIC_AXIS_INDEX) {
+            return semanticScoreByWord.get(wordNode.getWord().toLowerCase(Locale.ROOT));
+        }
+
+        if (!wordNode.hasValidPcaCoordinates(axisIndex)) {
+            return null;
+        }
+
+        return wordNode.getPcaVector()[axisIndex];
     }
 
 

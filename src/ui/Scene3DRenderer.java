@@ -24,6 +24,7 @@ import java.util.function.Consumer;
  */
 public class Scene3DRenderer {
 
+    public static final int SEMANTIC_AXIS_INDEX = 999;
     private static final double THREE_D_SCALE_FACTOR = 160.0;
 
     private static final double BASE_POINT_RADIUS = 2.5;
@@ -46,9 +47,40 @@ public class Scene3DRenderer {
     private static final Color PROBE_NEIGHBOR_COLOR = Color.GREEN;
     private static final Color FOCUSED_COLOR = Color.RED;
     private static final Color PROBE_CONNECTION_COLOR = Color.DARKGRAY;
+    private static final Color SEMANTIC_POLE_A_COLOR = Color.GREEN;
+    private static final Color SEMANTIC_POLE_B_COLOR = Color.RED;
+    private static final double SEMANTIC_POLE_POINT_RADIUS = HIGHLIGHT_POINT_RADIUS + 2.0;
 
     private Point3D lastComputedCenter = Point3D.ZERO;
     private boolean hasRenderablePoints;
+    private final Map<String, Double> semanticScoreByWord = new HashMap<>();
+    private WordNode semanticPoleA;
+    private WordNode semanticPoleB;
+
+    /**
+     * Caches semantic projection scores for optional semantic-axis rendering.
+     */
+    public void setSemanticScores(List<Map.Entry<String, Double>> projections) {
+        semanticScoreByWord.clear();
+        if (projections == null) {
+            return;
+        }
+
+        for (Map.Entry<String, Double> entry : projections) {
+            if (entry == null || entry.getKey() == null || entry.getValue() == null) {
+                continue;
+            }
+            semanticScoreByWord.put(entry.getKey().toLowerCase(Locale.ROOT), entry.getValue());
+        }
+    }
+
+    /**
+     * Stores semantic pole words for explicit visual highlighting.
+     */
+    public void setSemanticPoles(WordNode poleA, WordNode poleB) {
+        this.semanticPoleA = poleA;
+        this.semanticPoleB = poleB;
+    }
 
     /**
      * Builds a full point-cloud group containing base markers, highlights, paths, and labels.
@@ -89,7 +121,7 @@ public class Scene3DRenderer {
         Map<String, Point3D> pointByWord = new HashMap<>();
 
         List<WordNode> nodesFor3D = (words == null ? List.<WordNode>of() : words).stream()
-                .filter(node -> node.hasValidPcaCoordinates(xIndex, yIndex, zIndex))
+                .filter(node -> hasCoordinate(node, xIndex) && hasCoordinate(node, yIndex) && hasCoordinate(node, zIndex))
                 .filter(node -> node.getWord() != null)
                 .sorted(Comparator.comparing(WordNode::getWord, String.CASE_INSENSITIVE_ORDER))
                 .toList();
@@ -175,16 +207,39 @@ public class Scene3DRenderer {
         int yIndex = axes[1];
         int zIndex = axes[2];
 
-        if (!wordNode.hasValidPcaCoordinates(xIndex, yIndex, zIndex)) {
+        if (!hasCoordinate(wordNode, xIndex) || !hasCoordinate(wordNode, yIndex) || !hasCoordinate(wordNode, zIndex)) {
+            return null;
+        }
+        return new Point3D(
+                getCoordinate(wordNode, xIndex) * THREE_D_SCALE_FACTOR,
+                getCoordinate(wordNode, yIndex) * THREE_D_SCALE_FACTOR,
+                getCoordinate(wordNode, zIndex) * THREE_D_SCALE_FACTOR
+        );
+    }
+
+    private boolean hasCoordinate(WordNode wordNode, int axisIndex) {
+        return getCoordinateOrNull(wordNode, axisIndex) != null;
+    }
+
+    private double getCoordinate(WordNode wordNode, int axisIndex) {
+        Double value = getCoordinateOrNull(wordNode, axisIndex);
+        return value == null ? 0.0 : value;
+    }
+
+    private Double getCoordinateOrNull(WordNode wordNode, int axisIndex) {
+        if (wordNode == null || wordNode.getWord() == null) {
             return null;
         }
 
-        double[] vector = wordNode.getPcaVector();
-        return new Point3D(
-                vector[xIndex] * THREE_D_SCALE_FACTOR,
-                vector[yIndex] * THREE_D_SCALE_FACTOR,
-                vector[zIndex] * THREE_D_SCALE_FACTOR
-        );
+        if (axisIndex == SEMANTIC_AXIS_INDEX) {
+            return semanticScoreByWord.get(wordNode.getWord().toLowerCase(Locale.ROOT));
+        }
+
+        if (!wordNode.hasValidPcaCoordinates(axisIndex)) {
+            return null;
+        }
+
+        return wordNode.getPcaVector()[axisIndex];
     }
 
     private Point3D resolveCenterPoint(
@@ -301,6 +356,20 @@ public class Scene3DRenderer {
             }
         }
 
+        if (semanticPoleA != null && semanticPoleA.getWord() != null) {
+            Point3D point = pointByWord.get(normalizeWord(semanticPoleA));
+            if (point != null) {
+                labelCluster.add(new TextLabel3D(semanticPoleA.getWord(), point, SEMANTIC_POLE_A_COLOR));
+            }
+        }
+
+        if (semanticPoleB != null && semanticPoleB.getWord() != null) {
+            Point3D point = pointByWord.get(normalizeWord(semanticPoleB));
+            if (point != null) {
+                labelCluster.add(new TextLabel3D(semanticPoleB.getWord(), point, SEMANTIC_POLE_B_COLOR));
+            }
+        }
+
         if (probeSource != null && probeSource.getWord() != null) {
             Point3D point = pointByWord.get(normalizeWord(probeSource));
             if (point != null) {
@@ -347,6 +416,14 @@ public class Scene3DRenderer {
             WordNode mathResultWord,
             Set<WordNode> selectedGroup
     ) {
+        if (semanticPoleA != null && semanticPoleA.isSameWord(wordNode)) {
+            return new Marker3DStyle(SEMANTIC_POLE_A_COLOR, SEMANTIC_POLE_POINT_RADIUS, true);
+        }
+
+        if (semanticPoleB != null && semanticPoleB.isSameWord(wordNode)) {
+            return new Marker3DStyle(SEMANTIC_POLE_B_COLOR, SEMANTIC_POLE_POINT_RADIUS, true);
+        }
+
         boolean isSelectedGroupWord = selectedGroup != null
                 && selectedGroup.stream().anyMatch(groupNode -> groupNode != null && groupNode.isSameWord(wordNode));
         if (isSelectedGroupWord) {

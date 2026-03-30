@@ -49,6 +49,16 @@ public class LatentSpaceFacade {
     }
 
     /**
+     * Resolves a word to its corresponding node using case-insensitive matching.
+     */
+    public WordNode getWordNode(String requestedWord) {
+        if (requestedWord == null || requestedWord.isBlank()) {
+            return null;
+        }
+        return findWordNode(requestedWord);
+    }
+
+    /**
      * Finds similar words using the requested distance strategy.
      *
      * @param targetWord the word to search neighbors for

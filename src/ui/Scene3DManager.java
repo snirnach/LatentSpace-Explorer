@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -60,6 +61,8 @@ public class Scene3DManager implements IVisualizationView {
     private List<WordNode> probeNeighbors;
     private List<WordNode> mathPathWords;
     private WordNode mathResultWord;
+    private WordNode semanticPoleA;
+    private WordNode semanticPoleB;
     private Set<WordNode> selectedGroup;
 
     public Scene3DManager() {
@@ -162,6 +165,18 @@ public class Scene3DManager implements IVisualizationView {
     @Override
     public Set<WordNode> getSelectedGroup() {
         return new HashSet<>(selectedGroup);
+    }
+
+    @Override
+    public void setSemanticScores(List<Map.Entry<String, Double>> projections) {
+        renderer.setSemanticScores(projections);
+    }
+
+    @Override
+    public void setSemanticPoles(WordNode poleA, WordNode poleB) {
+        this.semanticPoleA = poleA;
+        this.semanticPoleB = poleB;
+        renderer.setSemanticPoles(poleA, poleB);
     }
 
     /**
@@ -336,7 +351,7 @@ public class Scene3DManager implements IVisualizationView {
         WordNode closestWord = null;
 
         for (WordNode word : currentWords) {
-            if (word == null || !word.hasValidPcaCoordinates(currentAxes[0], currentAxes[1], currentAxes[2])) {
+            if (word == null) {
                 continue;
             }
 

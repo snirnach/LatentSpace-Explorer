@@ -66,7 +66,9 @@ public class  MainController {
         this.mathAnalyticsController = new MathAnalyticsController(
                 this.facade,
                 this.controlPanelView,
-                () -> this.currentView
+                () -> this.currentView,
+                () -> new int[]{pcaStateSubject.getPcaX(), pcaStateSubject.getPcaY(), pcaStateSubject.getPcaZ()},
+                0
         );
 
         // Keep click handling delegated to the exploration workflow controller.

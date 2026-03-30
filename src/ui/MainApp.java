@@ -1,11 +1,13 @@
 package ui;
 
+import integration.StartupDataBootstrap;
+import javafx.application.Platform;
 import javafx.application.Application;
+import javafx.scene.control.Alert;
+import javafx.scene.control.ButtonType;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.stage.Stage;
-import model.EmbeddingRepository;
-import util.DataLoader;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,16 +26,25 @@ public class MainApp extends Application {
     private static final String APPLICATION_TITLE = "LatentSpace Explorer";
     private static final double DEFAULT_WINDOW_WIDTH = 1200;
     private static final double DEFAULT_WINDOW_HEIGHT = 800;
+    private static final String DEFAULT_SCRIPT_PATH = "src/embedder.py";
+    private static final String DEFAULT_DATA_DIRECTORY = "src";
 
     @Override
     public void start(Stage primaryStage) {
-        // Loading the generated JSON files into our Singleton Repository
-        DataLoader dataLoader = new DataLoader();
-        String basePath = "src/"; // The folder where you ran the Python script
-        dataLoader.loadDataToRepository(basePath + "full_vectors.json", basePath + "pca_vectors.json");
+        StartupConfig startupConfig = resolveStartupConfig();
+        StartupDataBootstrap.StartupResult startupResult = new StartupDataBootstrap().initializeData(
+                startupConfig.runPythonPreprocessing(),
+                startupConfig.pythonScriptPath(),
+                startupConfig.inputDataPath(),
+                startupConfig.dataDirectory()
+        );
 
-        System.out.println("Loaded " + EmbeddingRepository.INSTANCE.getAllWords().size() + " words into the repository.");
-        loadRepositoryDataIfConfigured();
+        if (!startupResult.success()) {
+            showStartupErrorAndExit(startupResult.message());
+            return;
+        }
+
+        System.out.println(startupResult.message());
 
         MainController mainController = new MainController();
         Parent rootView = mainController.getView();
@@ -44,47 +55,72 @@ public class MainApp extends Application {
         primaryStage.show();
     }
 
-    /**
-     * Loads JSON data into the repository only when a data path is provided.
-     * This keeps the GUI reusable in environments where another bootstrapper
-     * has already populated the repository.
-     */
-    private void loadRepositoryDataIfConfigured() {
-        if (!EmbeddingRepository.INSTANCE.getAllWords().isEmpty()) {
-            return;
-        }
+    private StartupConfig resolveStartupConfig() {
+        Path dataDirectory = resolveDataDirectory();
+        Path pythonScriptPath = resolvePythonScriptPath();
+        String inputDataPath = System.getProperty("latentspace.python.input.path");
 
-        String jsonDataPath = resolveJsonDataPath();
-        if (jsonDataPath == null || jsonDataPath.isBlank()) {
-            return;
-        }
-
-        Path inputPath = Paths.get(jsonDataPath);
-        Path baseDirectory = Files.isDirectory(inputPath) ? inputPath : inputPath.getParent();
-        if (baseDirectory == null) {
-            return;
-        }
-
-        DataLoader dataLoader = new DataLoader();
-        dataLoader.loadDataToRepository(
-                baseDirectory.resolve("full_vectors.json").toString(),
-                baseDirectory.resolve("pca_vectors.json").toString()
+        return new StartupConfig(
+                shouldRunPythonPreprocessing(),
+                pythonScriptPath,
+                inputDataPath,
+                dataDirectory
         );
     }
 
-    /**
-     * Resolves the optional JSON path from the first application argument.
-     * If no argument is present, a JVM system property can also be used.
-     *
-     * @return the configured JSON path, or {@code null} when none is provided
-     */
-    private String resolveJsonDataPath() {
-        List<String> rawArguments = getParameters().getRaw();
-        if (!rawArguments.isEmpty()) {
-            return rawArguments.get(0);
+    private Path resolveDataDirectory() {
+        Path defaultPath = Paths.get(DEFAULT_DATA_DIRECTORY).toAbsolutePath().normalize();
+
+        String propertyPath = System.getProperty("latentspace.data.path");
+        if (propertyPath != null && !propertyPath.isBlank()) {
+            Path configuredPath = Paths.get(propertyPath).toAbsolutePath().normalize();
+            return Files.isDirectory(configuredPath) ? configuredPath : configuredPath.getParent();
         }
 
-        return System.getProperty("latentspace.data.path");
+        for (String argument : getParameters().getRaw()) {
+            if (argument == null || argument.isBlank() || argument.startsWith("--")) {
+                continue;
+            }
+
+            Path configuredPath = Paths.get(argument).toAbsolutePath().normalize();
+            Path directory = Files.isDirectory(configuredPath) ? configuredPath : configuredPath.getParent();
+            if (directory != null) {
+                return directory;
+            }
+        }
+
+        return defaultPath;
+    }
+
+    private Path resolvePythonScriptPath() {
+        String scriptProperty = System.getProperty("latentspace.python.script", DEFAULT_SCRIPT_PATH);
+        return Paths.get(scriptProperty).toAbsolutePath().normalize();
+    }
+
+    private boolean shouldRunPythonPreprocessing() {
+        String propertyValue = System.getProperty("latentspace.python.enabled", "false");
+        if (Boolean.parseBoolean(propertyValue)) {
+            return true;
+        }
+
+        List<String> rawArguments = getParameters().getRaw();
+        return rawArguments.stream().anyMatch("--run-python"::equalsIgnoreCase);
+    }
+
+    private void showStartupErrorAndExit(String message) {
+        Alert alert = new Alert(Alert.AlertType.ERROR, message, ButtonType.OK);
+        alert.setTitle("Startup Error");
+        alert.setHeaderText("LatentSpace Explorer could not start");
+        alert.showAndWait();
+        Platform.exit();
+    }
+
+    private record StartupConfig(
+            boolean runPythonPreprocessing,
+            Path pythonScriptPath,
+            String inputDataPath,
+            Path dataDirectory
+    ) {
     }
 
     public static void main(String[] args) {

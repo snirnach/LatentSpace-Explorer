@@ -1,10 +1,15 @@
-package ui;
+package ui.controller;
 
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.event.ActionEvent;
 import model.WordNode;
 import service.LatentSpaceFacade;
+import command.CalculateEquationCommand;
+import command.CommandManager;
+import ui.view.ControlPanelView;
+import ui.view.Graph2DRenderer;
+import ui.view.IVisualizationView;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -22,13 +27,14 @@ public class MathAnalyticsController {
     private final Supplier<IVisualizationView> activeViewSupplier;
     private final Supplier<int[]> activeAxesSupplier;
     private final int semanticAxisTargetIndex;
+    private final CommandManager commandManager;
 
     public MathAnalyticsController(
             LatentSpaceFacade facade,
             ControlPanelView controlPanelView,
             Supplier<IVisualizationView> activeViewSupplier
     ) {
-        this(facade, controlPanelView, activeViewSupplier, () -> new int[]{0, 1, 2}, 0);
+        this(facade, controlPanelView, activeViewSupplier, () -> new int[]{0, 1, 2}, 0, null);
     }
 
     public MathAnalyticsController(
@@ -38,11 +44,23 @@ public class MathAnalyticsController {
             Supplier<int[]> activeAxesSupplier,
             int semanticAxisTargetIndex
     ) {
+        this(facade, controlPanelView, activeViewSupplier, activeAxesSupplier, semanticAxisTargetIndex, null);
+    }
+
+    public MathAnalyticsController(
+            LatentSpaceFacade facade,
+            ControlPanelView controlPanelView,
+            Supplier<IVisualizationView> activeViewSupplier,
+            Supplier<int[]> activeAxesSupplier,
+            int semanticAxisTargetIndex,
+            CommandManager commandManager
+    ) {
         this.facade = facade;
         this.controlPanelView = controlPanelView;
         this.activeViewSupplier = activeViewSupplier;
         this.activeAxesSupplier = activeAxesSupplier;
         this.semanticAxisTargetIndex = semanticAxisTargetIndex;
+        this.commandManager = commandManager;
         setupListeners();
     }
 
@@ -61,6 +79,15 @@ public class MathAnalyticsController {
             return;
         }
 
+        // Capture previous state before calculation
+        ObservableList<String> previousResults = FXCollections.observableArrayList(controlPanelView.getResultsListView().getItems());
+        String previousResultsTitle = controlPanelView.getResultsTitleLabel().getText();
+        String previousStatusMessage = controlPanelView.getStatusLabel().getText();
+        String previousEquationText = controlPanelView.getEquationText();
+        WordNode previousResultWord = null; // We don't track this in current UI, so it's null
+        List<WordNode> previousEquationWords = new ArrayList<>(); // We don't track this in current UI
+
+        // Calculate the new equation result
         List<WordNode> equationWords = new ArrayList<>();
         WordNode resultWord = facade.solveEquation(equationText, equationWords);
         if (resultWord == null) {
@@ -68,17 +95,38 @@ public class MathAnalyticsController {
             return;
         }
 
-        ObservableList<String> mathItems = FXCollections.observableArrayList();
-        mathItems.add(resultWord.getWord());
-        controlPanelView.displayResults(mathItems);
-        controlPanelView.setResultsTitle("Showing: Math Results");
+        // Prepare new state
+        ObservableList<String> newResults = FXCollections.observableArrayList();
+        newResults.add(resultWord.getWord());
+        String newResultsTitle = "Showing: Math Results";
+        String newStatusMessage = "Equation computed: " + equationText + ".";
 
         IVisualizationView activeView = activeViewSupplier.get();
-        if (activeView != null) {
-            activeView.showMathPath(equationWords, resultWord);
-        }
 
-        controlPanelView.setStatusMessage("Equation computed: " + equationText + ".");
+        // Create command with both old and new state
+        CalculateEquationCommand command = new CalculateEquationCommand(
+                activeView,
+                controlPanelView,
+                previousResultWord,
+                previousEquationWords,
+                previousResults,
+                previousResultsTitle,
+                previousStatusMessage,
+                previousEquationText,
+                resultWord,
+                equationWords,
+                newResults,
+                newResultsTitle,
+                newStatusMessage,
+                equationText
+        );
+
+
+        // Execute command through CommandManager if available
+        if (commandManager != null) {
+            commandManager.executeCommand(command);
+            updateHistoryButtonsState();
+        }
     }
 
     private void handleProjectOnAxisAction(ActionEvent event) {
@@ -124,7 +172,7 @@ public class MathAnalyticsController {
             int[] projectedAxes = java.util.Arrays.copyOf(baseAxes, baseAxes.length);
 
             // Map the custom semantic axis (index 999) to the target dimension (X, Y, or Z)
-            int targetIdx = Math.max(0, Math.min(2, semanticAxisTargetIndex));
+            int targetIdx = Math.clamp(semanticAxisTargetIndex, 0, 2);
             projectedAxes[targetIdx] = Graph2DRenderer.SEMANTIC_AXIS_INDEX; // Uses the 999 sentinel value
 
             // Trigger a full redraw with the new semantic coordinate mapping
@@ -135,16 +183,14 @@ public class MathAnalyticsController {
         controlPanelView.setStatusMessage("Semantic projection calculated using '" + wordA + "' (positive) and '" + wordB + "' (negative).");
     }
 
-    private int[] normalizeAxes(int[] axes) {
-        if (axes == null || axes.length < 3) {
-            return new int[]{0, 1, 2};
+    /**
+     * Updates the state of undo and redo buttons based on command history availability.
+     */
+    private void updateHistoryButtonsState() {
+        if (commandManager != null) {
+            controlPanelView.setUndoButtonDisabled(!commandManager.canUndo());
+            controlPanelView.setRedoButtonDisabled(!commandManager.canRedo());
         }
-
-        return new int[]{
-                axes[0],
-                axes[1],
-                axes[2]
-        };
     }
 }
 

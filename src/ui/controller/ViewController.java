@@ -1,10 +1,17 @@
-package ui;
+package ui.controller;
 
 import javafx.event.ActionEvent;
 import javafx.scene.Node;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.ScrollEvent;
+import command.ChangePcaAxesCommand;
+import command.CommandManager;
+import ui.state.IPcaObserver;
+import ui.state.PcaStateSubject;
+import ui.view.ControlPanelView;
+import ui.view.Graph2DView;
+import ui.view.Scene3DManager;
 
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -18,6 +25,7 @@ public class ViewController implements IPcaObserver {
 
     private final ControlPanelView controlPanelView;
     private final PcaStateSubject pcaStateSubject;
+    private final CommandManager commandManager;
     private final Consumer<Boolean> onToggle3D;
 
     private Graph2DView graph2DView;
@@ -28,10 +36,12 @@ public class ViewController implements IPcaObserver {
     public ViewController(
             ControlPanelView controlPanelView,
             PcaStateSubject pcaStateSubject,
+            CommandManager commandManager,
             Consumer<Boolean> onToggle3D
     ) {
         this.controlPanelView = controlPanelView;
         this.pcaStateSubject = pcaStateSubject;
+        this.commandManager = commandManager;
         this.onToggle3D = onToggle3D;
 
         setupListeners();
@@ -54,7 +64,34 @@ public class ViewController implements IPcaObserver {
         controlPanelView.setOnToggleViewAction(this::handleToggleAction);
         controlPanelView.setOnZoomInAction(this::handleZoomInAction);
         controlPanelView.setOnZoomOutAction(this::handleZoomOutAction);
-        controlPanelView.setOnPcaAxesChanged(pcaStateSubject::updateAxes);
+        controlPanelView.setOnPcaAxesChanged(this::handlePcaAxesChanged);
+        controlPanelView.setOnUndoAction(this::handleUndoAction);
+        controlPanelView.setOnRedoAction(this::handleRedoAction);
+        
+        // Initialize history button state
+        updateHistoryButtonsState();
+    }
+
+    /**
+     * Handles PCA axes changes by creating and executing a command.
+     * This allows undo/redo functionality for axis changes.
+     */
+    private void handlePcaAxesChanged(int newX, int newY, int newZ) {
+        int oldX = pcaStateSubject.getPcaX();
+        int oldY = pcaStateSubject.getPcaY();
+        int oldZ = pcaStateSubject.getPcaZ();
+
+        // Only execute command if axes actually changed
+        if (oldX != newX || oldY != newY || oldZ != newZ) {
+            ChangePcaAxesCommand command = new ChangePcaAxesCommand(
+                    pcaStateSubject,
+                    controlPanelView,
+                    oldX, oldY, oldZ,
+                    newX, newY, newZ
+            );
+            commandManager.executeCommand(command);
+            updateHistoryButtonsState();
+        }
     }
 
     private void handleToggleAction(ActionEvent event) {
@@ -92,6 +129,34 @@ public class ViewController implements IPcaObserver {
         // Main controller callback refreshes active view data for the selected PCA axes.
         if (onAxesChangedCallback != null) {
             onAxesChangedCallback.run();
+        }
+    }
+
+    /**
+     * Updates the state of undo and redo buttons based on command history availability.
+     */
+    private void updateHistoryButtonsState() {
+        controlPanelView.setUndoButtonDisabled(!commandManager.canUndo());
+        controlPanelView.setRedoButtonDisabled(!commandManager.canRedo());
+    }
+
+    /**
+     * Handles undo action triggered by the Undo button.
+     */
+    private void handleUndoAction(javafx.event.ActionEvent event) {
+        if (commandManager.canUndo()) {
+            commandManager.undo();
+            updateHistoryButtonsState();
+        }
+    }
+
+    /**
+     * Handles redo action triggered by the Redo button.
+     */
+    private void handleRedoAction(javafx.event.ActionEvent event) {
+        if (commandManager.canRedo()) {
+            commandManager.redo();
+            updateHistoryButtonsState();
         }
     }
 

@@ -1,4 +1,4 @@
-package ui;
+package ui.controller;
 
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -8,7 +8,13 @@ import model.WordNode;
 import model.distance.DistanceStrategy;
 import model.distance.DistanceStrategyFactory;
 import service.LatentSpaceFacade;
+import command.CommandManager;
+import command.FindNeighborsCommand;
+import ui.view.ControlPanelView;
+import ui.view.IVisualizationView;
+import ui.state.InteractionModel;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -23,17 +29,20 @@ public class ExplorationController {
     private final ControlPanelView controlPanelView;
     private final InteractionModel interactionModel;
     private final Supplier<IVisualizationView> activeViewSupplier;
+    private final CommandManager commandManager;
 
     public ExplorationController(
             LatentSpaceFacade facade,
             ControlPanelView controlPanelView,
             InteractionModel interactionModel,
-            Supplier<IVisualizationView> activeViewSupplier
+            Supplier<IVisualizationView> activeViewSupplier,
+            CommandManager commandManager
     ) {
         this.facade = facade;
         this.controlPanelView = controlPanelView;
         this.interactionModel = interactionModel;
         this.activeViewSupplier = activeViewSupplier;
+        this.commandManager = commandManager;
         setupListeners();
     }
 
@@ -63,6 +72,14 @@ public class ExplorationController {
             return;
         }
 
+        // Capture previous state before making changes
+        WordNode previousTargetNode = interactionModel.getActiveTargetNode();
+        List<WordNode> previousNeighbors = new ArrayList<>(interactionModel.getActiveNeighborNodes());
+        ObservableList<String> previousResults = FXCollections.observableArrayList(controlPanelView.getResultsListView().getItems());
+        String previousResultsTitle = controlPanelView.getResultsTitleLabel().getText();
+        String previousStatusMessage = controlPanelView.getStatusLabel().getText();
+        String previousSearchText = controlPanelView.getSearchText();
+
         // Clear old probe/math/group state before applying new focus.
         IVisualizationView activeView = activeViewSupplier.get();
         if (activeView != null) {
@@ -72,10 +89,6 @@ public class ExplorationController {
         // Clear measurement state so old measurement UI does not remain.
         interactionModel.clearMeasurementState();
 
-        if (activeView != null) {
-            activeView.focusOnWord(foundWord);
-        }
-
         int kValue = controlPanelView.getKValue();
         List<WordNode> neighbors = facade.findSimilarWords(
                 foundWord.getWord(),
@@ -83,11 +96,32 @@ public class ExplorationController {
                 controlPanelView.getDistanceMetric()
         );
 
-        interactionModel.setActiveTargetNode(foundWord);
-        interactionModel.setActiveNeighborNodes(neighbors);
-        controlPanelView.displayResults(toWordList(neighbors));
-        controlPanelView.setResultsTitle("Showing: Nearest Neighbors");
-        controlPanelView.setStatusMessage("Focused on word: '" + foundWord.getWord() + "'.");
+        // Create command with both old and new state
+        ObservableList<String> newResults = toWordList(neighbors);
+        FindNeighborsCommand command = new FindNeighborsCommand(
+                interactionModel,
+                activeView,
+                controlPanelView,
+                previousTargetNode,
+                previousNeighbors,
+                previousResults,
+                previousResultsTitle,
+                previousStatusMessage,
+                previousSearchText,
+                foundWord,
+                neighbors,
+                newResults,
+                "Showing: Nearest Neighbors",
+                "Focused on word: '" + foundWord.getWord() + "'.",
+                requestedWord
+        );
+
+
+        // Execute command through CommandManager
+        commandManager.executeCommand(command);
+        
+        // Update undo/redo buttons
+        updateHistoryButtonsState();
     }
 
     private void handleMeasureButtonAction(ActionEvent event) {
@@ -100,6 +134,14 @@ public class ExplorationController {
 
         controlPanelView.setDistanceResultText("Select second point...");
         controlPanelView.setMeasureButtonDisabled(true);
+    }
+
+    /**
+     * Updates the state of undo and redo buttons based on command history availability.
+     */
+    private void updateHistoryButtonsState() {
+        controlPanelView.setUndoButtonDisabled(!commandManager.canUndo());
+        controlPanelView.setRedoButtonDisabled(!commandManager.canRedo());
     }
 
     private void handleAnalyzeSubspaceGroupAction(ActionEvent event) {

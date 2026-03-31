@@ -1,4 +1,4 @@
-package ui;
+package ui.state;
 
 import model.WordNode;
 import model.distance.DistanceStrategy;

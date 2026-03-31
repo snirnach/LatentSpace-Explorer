@@ -1,4 +1,4 @@
-package ui;
+package ui.view;
 
 import javafx.scene.canvas.Canvas;
 import javafx.scene.input.MouseButton;

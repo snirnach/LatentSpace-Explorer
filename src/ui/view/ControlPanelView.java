@@ -1,4 +1,4 @@
-package ui;
+package ui.view;
 
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -14,6 +14,7 @@ import javafx.scene.control.Spinner;
 import javafx.scene.control.TextField;
 import javafx.scene.control.ToggleButton;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 
 /**
@@ -54,7 +55,10 @@ public class ControlPanelView {
     private final TextField semanticAxisWordBField;
     private final Button projectOnAxisButton;
     private final Button analyzeSubspaceGroupButton;
+    private final Button undoButton;
+    private final Button redoButton;
     private PcaAxesChangeListener pcaAxesChangeListener;
+    private boolean isUpdatingProgrammatically = false;
 
     public ControlPanelView() {
         this.searchField = new TextField();
@@ -105,7 +109,15 @@ public class ControlPanelView {
         this.projectOnAxisButton = new Button("Project onto Axis");
         this.analyzeSubspaceGroupButton = new Button("Analyze Subspace Group");
 
-        // Disable focus traversal for action controls to prevent side-panel auto-scroll jumps.
+        this.undoButton = new Button("Undo");
+        this.undoButton.setDisable(true);
+        this.undoButton.setFocusTraversable(false);
+
+        this.redoButton = new Button("Redo");
+        this.redoButton.setDisable(true);
+        this.redoButton.setFocusTraversable(false);
+
+        // ...existing code...
         this.searchButton.setFocusTraversable(false);
         this.toggle3dButton.setFocusTraversable(false);
         this.zoomInButton.setFocusTraversable(false);
@@ -125,6 +137,9 @@ public class ControlPanelView {
     }
 
     private void publishAxes() {
+        if (isUpdatingProgrammatically) {
+            return;
+        }
         if (pcaAxesChangeListener == null) {
             return;
         }
@@ -149,6 +164,14 @@ public class ControlPanelView {
         Label panelTitle = new Label("Control Panel");
         panelTitle.setStyle("-fx-font-size: 16px; -fx-font-weight: bold; -fx-text-fill: #333333;");
 
+        HBox historyPanel = new HBox(8);
+        historyPanel.setStyle("-fx-padding: 5; -fx-border-color: #ddd; -fx-border-width: 1; -fx-border-radius: 3;");
+        undoButton.setMaxWidth(Double.MAX_VALUE);
+        redoButton.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(undoButton, Priority.ALWAYS);
+        HBox.setHgrow(redoButton, Priority.ALWAYS);
+        historyPanel.getChildren().addAll(undoButton, redoButton);
+
         Label distanceMetricLabel = new Label("Distance Metric");
         distanceMetricLabel.setStyle("-fx-text-fill: #333333;");
         
@@ -168,6 +191,7 @@ public class ControlPanelView {
 
         VBox controlPanel = new VBox(10,
                 panelTitle,
+                historyPanel,
                 toggle3dButton,
                 createPcaSelectionPanel(),
                 distanceMetricLabel,
@@ -305,6 +329,22 @@ public class ControlPanelView {
         analyzeSubspaceGroupButton.setOnAction(handler);
     }
 
+    public void setOnUndoAction(EventHandler<ActionEvent> handler) {
+        undoButton.setOnAction(handler);
+    }
+
+    public void setOnRedoAction(EventHandler<ActionEvent> handler) {
+        redoButton.setOnAction(handler);
+    }
+
+    public void setUndoButtonDisabled(boolean disabled) {
+        undoButton.setDisable(disabled);
+    }
+
+    public void setRedoButtonDisabled(boolean disabled) {
+        redoButton.setDisable(disabled);
+    }
+
     public void setOnPcaAxesChanged(PcaAxesChangeListener listener) {
         this.pcaAxesChangeListener = listener;
     }
@@ -367,6 +407,57 @@ public class ControlPanelView {
 
     public void setToggleButtonText(String text) {
         toggle3dButton.setText(text);
+    }
+
+    public ListView<String> getResultsListView() {
+        return resultsListView;
+    }
+
+    public Label getResultsTitleLabel() {
+        return resultsTitleLabel;
+    }
+
+    public Label getStatusLabel() {
+        return statusLabel;
+    }
+
+    /**
+     * Updates the PCA ComboBox values without triggering change listeners.
+     * Used during undo/redo to update the UI without creating new commands.
+     *
+     * @param x the X axis component index
+     * @param y the Y axis component index
+     * @param z the Z axis component index
+     */
+    public void setPcaComboBoxValues(int x, int y, int z) {
+        try {
+            isUpdatingProgrammatically = true;
+            pcaXCombo.setValue(x);
+            pcaYCombo.setValue(y);
+            pcaZCombo.setValue(z);
+        } finally {
+            isUpdatingProgrammatically = false;
+        }
+    }
+
+    /**
+     * Sets the search field text.
+     * Used during undo/redo to restore the search text.
+     *
+     * @param text the search text to display
+     */
+    public void setSearchText(String text) {
+        searchField.setText(text != null ? text : "");
+    }
+
+    /**
+     * Sets the equation field text.
+     * Used during undo/redo to restore the equation text.
+     *
+     * @param text the equation text to display
+     */
+    public void setEquationText(String text) {
+        equationField.setText(text != null ? text : "");
     }
 }
 

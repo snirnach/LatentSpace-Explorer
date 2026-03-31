@@ -1,4 +1,4 @@
-package ui;
+package ui.view;
 
 import javafx.geometry.Point3D;
 import javafx.scene.Group;

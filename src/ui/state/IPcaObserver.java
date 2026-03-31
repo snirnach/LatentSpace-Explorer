@@ -1,4 +1,4 @@
-package ui;
+package ui.state;
 
 /**
  * Observer contract for PCA axis selection changes.

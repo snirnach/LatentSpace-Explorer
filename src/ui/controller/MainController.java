@@ -1,4 +1,4 @@
-package ui;
+package ui.controller;
 
 import javafx.geometry.Insets;
 import javafx.scene.Parent;
@@ -6,6 +6,13 @@ import javafx.scene.layout.BorderPane;
 import model.EmbeddingRepository;
 import model.WordNode;
 import service.LatentSpaceFacade;
+import command.CommandManager;
+import ui.state.InteractionModel;
+import ui.state.PcaStateSubject;
+import ui.view.ControlPanelView;
+import ui.view.Graph2DView;
+import ui.view.IVisualizationView;
+import ui.view.Scene3DManager;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -26,6 +33,7 @@ public class  MainController {
     private final Graph2DView graph2DView;
     private final ExplorationController explorationController;
     private final ViewController viewController;
+    private final CommandManager commandManager;
     @SuppressWarnings("unused")
     private final MathAnalyticsController mathAnalyticsController;
 
@@ -35,6 +43,7 @@ public class  MainController {
     public MainController() {
         this.facade = new LatentSpaceFacade();
         this.pcaStateSubject = new PcaStateSubject();
+        this.commandManager = new CommandManager();
         this.interactionModel = new InteractionModel();
         this.controlPanelView = new ControlPanelView();
         this.graph2DView = new Graph2DView();
@@ -48,12 +57,14 @@ public class  MainController {
                 this.facade,
                 this.controlPanelView,
                 this.interactionModel,
-                () -> this.currentView
+                () -> this.currentView,
+                this.commandManager
         );
 
         this.viewController = new ViewController(
                 this.controlPanelView,
                 this.pcaStateSubject,
+                this.commandManager,
                 this::switchVisualizationMode
         );
         this.viewController.configureViewAccess(
@@ -68,7 +79,8 @@ public class  MainController {
                 this.controlPanelView,
                 () -> this.currentView,
                 () -> new int[]{pcaStateSubject.getPcaX(), pcaStateSubject.getPcaY(), pcaStateSubject.getPcaZ()},
-                0
+                0,
+                this.commandManager
         );
 
         // Keep click handling delegated to the exploration workflow controller.
@@ -159,6 +171,15 @@ public class  MainController {
         controlPanelView.setStatusMessage(
                 "Loaded " + totalWords + " words. The visualization renders the full dataset."
         );
+    }
+
+    /**
+     * Returns the CommandManager for executing, undoing, and redoing commands.
+     *
+     * @return the command manager
+     */
+    public CommandManager getCommandManager() {
+        return commandManager;
     }
 }
 

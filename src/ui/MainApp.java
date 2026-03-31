@@ -8,6 +8,7 @@ import javafx.scene.control.ButtonType;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.stage.Stage;
+import ui.controller.MainController;
 
 import java.nio.file.Files;
 import java.nio.file.Path;

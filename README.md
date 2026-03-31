@@ -62,7 +62,7 @@ This project was engineered with a strict adherence to **SOLID principles**, Cle
 1. Clone the repository:
    ```bash
    git clone [https://github.com/snirnach/LatentSpace-Explorer.git](https://github.com/snirnach/LatentSpace-Explorer.git)
-2. Compile and run MainApp.java.
+2. Compile and run ui.MainApp.java.
 3. The application will automatically load the JSON embeddings from the src/ directory.
 
 👤 Author

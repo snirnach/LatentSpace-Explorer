@@ -30,19 +30,22 @@ public class ExplorationController {
     private final InteractionModel interactionModel;
     private final Supplier<IVisualizationView> activeViewSupplier;
     private final CommandManager commandManager;
+    private final Runnable onCommandExecuted;
 
     public ExplorationController(
             LatentSpaceFacade facade,
             ControlPanelView controlPanelView,
             InteractionModel interactionModel,
             Supplier<IVisualizationView> activeViewSupplier,
-            CommandManager commandManager
+            CommandManager commandManager,
+            Runnable onCommandExecuted
     ) {
         this.facade = facade;
         this.controlPanelView = controlPanelView;
         this.interactionModel = interactionModel;
         this.activeViewSupplier = activeViewSupplier;
         this.commandManager = commandManager;
+        this.onCommandExecuted = onCommandExecuted;
         setupListeners();
     }
 
@@ -72,7 +75,10 @@ public class ExplorationController {
             return;
         }
 
-        // Capture previous state before making changes
+        controlPanelView.setEquationText("");
+        controlPanelView.setSemanticAxisWordAText("");
+        controlPanelView.setSemanticAxisWordBText("");
+
         WordNode previousTargetNode = interactionModel.getActiveTargetNode();
         List<WordNode> previousNeighbors = new ArrayList<>(interactionModel.getActiveNeighborNodes());
         ObservableList<String> previousResults = FXCollections.observableArrayList(controlPanelView.getResultsListView().getItems());
@@ -80,13 +86,11 @@ public class ExplorationController {
         String previousStatusMessage = controlPanelView.getStatusLabel().getText();
         String previousSearchText = controlPanelView.getSearchText();
 
-        // Clear old probe/math/group state before applying new focus.
         IVisualizationView activeView = activeViewSupplier.get();
         if (activeView != null) {
             activeView.clearVisualSelection();
         }
 
-        // Clear measurement state so old measurement UI does not remain.
         interactionModel.clearMeasurementState();
 
         int kValue = controlPanelView.getKValue();
@@ -96,7 +100,6 @@ public class ExplorationController {
                 controlPanelView.getDistanceMetric()
         );
 
-        // Create command with both old and new state
         ObservableList<String> newResults = toWordList(neighbors);
         FindNeighborsCommand command = new FindNeighborsCommand(
                 interactionModel,
@@ -116,32 +119,23 @@ public class ExplorationController {
                 requestedWord
         );
 
-
-        // Execute command through CommandManager
         commandManager.executeCommand(command);
-        
-        // Update undo/redo buttons
-        updateHistoryButtonsState();
+
+        if (onCommandExecuted != null) {
+            onCommandExecuted.run();
+        }
     }
 
     private void handleMeasureButtonAction(ActionEvent event) {
         InteractionModel.InteractionResult result = interactionModel.beginMeasurement();
-        if (result.getType() == InteractionModel.ResultType.ERROR) {
-            controlPanelView.setDistanceResultText(result.getMessage());
+        if (result.type() == InteractionModel.ResultType.ERROR) {
+            controlPanelView.setDistanceResultText(result.message());
             controlPanelView.setMeasureButtonDisabled(!interactionModel.isMeasureButtonEnabled());
             return;
         }
 
         controlPanelView.setDistanceResultText("Select second point...");
         controlPanelView.setMeasureButtonDisabled(true);
-    }
-
-    /**
-     * Updates the state of undo and redo buttons based on command history availability.
-     */
-    private void updateHistoryButtonsState() {
-        controlPanelView.setUndoButtonDisabled(!commandManager.canUndo());
-        controlPanelView.setRedoButtonDisabled(!commandManager.canRedo());
     }
 
     private void handleAnalyzeSubspaceGroupAction(ActionEvent event) {
@@ -152,6 +146,7 @@ public class ExplorationController {
 
         Set<WordNode> selectedGroup = activeView.getSelectedGroup();
         if (selectedGroup == null || selectedGroup.isEmpty()) {
+            controlPanelView.setStatusMessage("Please select a group of words first (Shift + Click).");
             return;
         }
 
@@ -164,16 +159,18 @@ public class ExplorationController {
         String distanceMetric = controlPanelView.getDistanceMetric();
         List<WordNode> neighbors = facade.findSimilarToVector(centroid, kValue, distanceMetric);
 
+        interactionModel.setActiveTargetNode(null);
+        interactionModel.setActiveNeighborNodes(neighbors);
+
+        activeView.showNearestNeighbors(null, neighbors);
+
         controlPanelView.displayResults(toWordList(neighbors));
         controlPanelView.setResultsTitle("Subspace Centroid Neighbors");
         controlPanelView.setStatusMessage(
-                "Showing centroid neighbors for a selected group of " + selectedGroup.size() + " words."
+                "Showing " + neighbors.size() + " neighbors for a centroid of " + selectedGroup.size() + " words."
         );
     }
 
-    /**
-     * Handles clicks from the active visualization and updates state machine and UI.
-     */
     public void handleWordClick(WordNode clickedNode) {
         IVisualizationView activeView = activeViewSupplier.get();
         if (clickedNode == null || clickedNode.getWord() == null || clickedNode.getWord().isBlank()) {
@@ -181,70 +178,66 @@ public class ExplorationController {
             return;
         }
 
-        // A regular point click clears search focus before source/probe state is applied.
-//        if (!interactionModel.isMeasuringMode() && activeView != null) {
-//            activeView.focusOnWord(null);
-//        }
-
         InteractionModel.InteractionResult result = interactionModel.handlePointClick(
                 clickedNode,
                 createSelectedDistanceStrategy()
         );
 
-        if (result.getType() == InteractionModel.ResultType.ERROR) {
-            controlPanelView.setDistanceResultText(result.getMessage());
-            controlPanelView.setMeasureButtonDisabled(!interactionModel.isMeasureButtonEnabled());
-            return;
-        }
-
-        if (result.getType() == InteractionModel.ResultType.SOURCE_SELECTED) {
-            controlPanelView.setSelectedWordText("Selected: " + getDisplayWord(interactionModel.getSourceNode()));
-            controlPanelView.setMeasureButtonDisabled(!interactionModel.isMeasureButtonEnabled());
-
-            if (!interactionModel.isMeasuringMode()) {
-                controlPanelView.setDistanceResultText("");
-                String selectedMetric = controlPanelView.getDistanceMetric();
-                int kValue = controlPanelView.getKValue();
-                List<WordNode> neighbors = facade.findSimilarWords(clickedNode.getWord(), kValue, selectedMetric);
-
-                interactionModel.setActiveTargetNode(clickedNode);
-                interactionModel.setActiveNeighborNodes(neighbors);
-
-                if (activeView != null) {
-                    activeView.showNearestNeighbors(clickedNode, neighbors);
-                }
-
-                controlPanelView.displayResults(toWordList(neighbors));
-                controlPanelView.setResultsTitle("Showing: Nearest Neighbors");
+        switch (result.type()) {
+            case ERROR -> {
+                controlPanelView.setDistanceResultText(result.message());
+                controlPanelView.setMeasureButtonDisabled(!interactionModel.isMeasureButtonEnabled());
             }
-            return;
-        }
+            case SOURCE_SELECTED -> {
+                controlPanelView.setEquationText("");
+                controlPanelView.setSemanticAxisWordAText("");
+                controlPanelView.setSemanticAxisWordBText("");
 
-        if (result.getType() == InteractionModel.ResultType.DISTANCE_MEASURED) {
-            controlPanelView.setDistanceResultText(String.format(
-                    Locale.US,
-                    "Distance between '%s' and '%s': %.6f",
-                    getDisplayWord(result.getSourceNode()),
-                    getDisplayWord(result.getTargetNode()),
-                    result.getDistance()
-            ));
-            controlPanelView.setSelectedWordText("Selected: None");
-            controlPanelView.setMeasureButtonDisabled(!interactionModel.isMeasureButtonEnabled());
+                controlPanelView.setSelectedWordText("Selected: " + getDisplayWord(result.sourceNode()));
+                controlPanelView.setMeasureButtonDisabled(!interactionModel.isMeasureButtonEnabled());
 
-            interactionModel.setActiveTargetNode(null);
-            interactionModel.setActiveNeighborNodes(List.of());
-            return;
-        }
+                if (!interactionModel.isMeasuringMode()) {
+                    controlPanelView.setDistanceResultText("");
+                    String selectedMetric = controlPanelView.getDistanceMetric();
+                    int kValue = controlPanelView.getKValue();
+                    List<WordNode> neighbors = facade.findSimilarWords(clickedNode.getWord(), kValue, selectedMetric);
 
-        if (result.getType() == InteractionModel.ResultType.AWAITING_SECOND_POINT) {
-            controlPanelView.setDistanceResultText(result.getMessage());
-            controlPanelView.setMeasureButtonDisabled(true);
+                    interactionModel.setActiveTargetNode(clickedNode);
+                    interactionModel.setActiveNeighborNodes(neighbors);
+
+                    if (activeView != null) {
+                        activeView.showNearestNeighbors(clickedNode, neighbors);
+                    }
+
+                    controlPanelView.displayResults(toWordList(neighbors));
+                    controlPanelView.setResultsTitle("Showing: Nearest Neighbors");
+                } else {
+                    if (activeView != null) {
+                        activeView.focusOnWord(clickedNode);
+                    }
+                }
+            }
+            case DISTANCE_MEASURED -> {
+                controlPanelView.setDistanceResultText(String.format(
+                        Locale.US,
+                        "Distance between '%s' and '%s': %.6f",
+                        getDisplayWord(result.sourceNode()),
+                        getDisplayWord(result.targetNode()),
+                        result.distance()
+                ));
+                controlPanelView.setSelectedWordText("Selected: None");
+                controlPanelView.setMeasureButtonDisabled(!interactionModel.isMeasureButtonEnabled());
+
+                interactionModel.setActiveTargetNode(null);
+                interactionModel.setActiveNeighborNodes(List.of());
+            }
+            case AWAITING_SECOND_POINT -> {
+                controlPanelView.setDistanceResultText(result.message());
+                controlPanelView.setMeasureButtonDisabled(true);
+            }
         }
     }
 
-    /**
-     * Clears focused search visuals when an external UI action changes the active mode.
-     */
     public void resetVisualFocusState() {
         IVisualizationView activeView = activeViewSupplier.get();
         if (activeView != null) {
@@ -266,6 +259,8 @@ public class ExplorationController {
         controlPanelView.setSelectedWordText("Selected: None");
         controlPanelView.setDistanceResultText("");
         controlPanelView.setMeasureButtonDisabled(!interactionModel.isMeasureButtonEnabled());
+        controlPanelView.setEquationText("");
+        controlPanelView.setSearchText("");
         controlPanelView.setStatusMessage("Selection cleared.");
     }
 
@@ -294,4 +289,3 @@ public class ExplorationController {
         return wordNode.getWord();
     }
 }
-

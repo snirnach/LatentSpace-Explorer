@@ -15,6 +15,7 @@ import java.util.function.Consumer;
  */
 public class WordLeaf3D implements IComponent3D {
     private static final int DEFAULT_SPHERE_DIVISIONS = 16;
+    private static final double SPECULAR_POWER = 16.0;
 
     private final WordNode node;
     private final double x;
@@ -48,15 +49,16 @@ public class WordLeaf3D implements IComponent3D {
         Sphere sphere = new Sphere(radius, DEFAULT_SPHERE_DIVISIONS);
         sphere.setFocusTraversable(false);
 
-        // Keep material simple and predictable for the restored dark-blue theme.
-        sphere.setMaterial(new PhongMaterial(color));
+        PhongMaterial material = new PhongMaterial(color);
+        material.setSpecularColor(Color.WHITE);
+        material.setSpecularPower(SPECULAR_POWER);
+        sphere.setMaterial(material);
 
         sphere.setTranslateX(x);
         sphere.setTranslateY(y);
         sphere.setTranslateZ(z);
         Tooltip.install(sphere, new Tooltip(node == null ? "<unnamed>" : node.getWord()));
 
-        // Keep press updates available for drag anchor synchronization.
         sphere.setOnMousePressed(event -> {
             if (onPress != null) {
                 onPress.accept(event);
@@ -66,4 +68,3 @@ public class WordLeaf3D implements IComponent3D {
         parent.getChildren().add(sphere);
     }
 }
-

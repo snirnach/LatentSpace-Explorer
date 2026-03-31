@@ -13,11 +13,7 @@ public class InteractionModel {
     private WordNode sourceNode;
     private boolean isMeasuringMode;
     private WordNode activeTargetNode;
-    private List<WordNode> activeNeighborNodes;
-
-    public InteractionModel() {
-        this.activeNeighborNodes = List.of();
-    }
+    private List<WordNode> activeNeighborNodes = List.of();
 
     /**
      * Handles click behavior for both source selection and second-point distance measurement.
@@ -114,20 +110,7 @@ public class InteractionModel {
         this.activeNeighborNodes = activeNeighborNodes == null ? List.of() : List.copyOf(activeNeighborNodes);
     }
 
-    public static final class InteractionResult {
-        private final ResultType type;
-        private final String message;
-        private final WordNode sourceNode;
-        private final WordNode targetNode;
-        private final Double distance;
-
-        private InteractionResult(ResultType type, String message, WordNode sourceNode, WordNode targetNode, Double distance) {
-            this.type = type;
-            this.message = message;
-            this.sourceNode = sourceNode;
-            this.targetNode = targetNode;
-            this.distance = distance;
-        }
+    public record InteractionResult(ResultType type, String message, WordNode sourceNode, WordNode targetNode, Double distance) {
 
         public static InteractionResult sourceSelected(WordNode selectedNode) {
             return new InteractionResult(ResultType.SOURCE_SELECTED, null, selectedNode, null, null);
@@ -143,26 +126,6 @@ public class InteractionModel {
 
         public static InteractionResult error(String message) {
             return new InteractionResult(ResultType.ERROR, message, null, null, null);
-        }
-
-        public ResultType getType() {
-            return type;
-        }
-
-        public String getMessage() {
-            return message;
-        }
-
-        public WordNode getSourceNode() {
-            return sourceNode;
-        }
-
-        public WordNode getTargetNode() {
-            return targetNode;
-        }
-
-        public Double getDistance() {
-            return distance;
         }
     }
 

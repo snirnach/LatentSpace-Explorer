@@ -28,10 +28,7 @@ import java.util.function.Consumer;
  */
 public class Scene3DManager implements IVisualizationView {
 
-    // Click-vs-drag threshold: movements below this distance are treated as clicks.
-    // Prevents drag release from triggering empty-click selection clearing.
     private static final double DRAG_THRESHOLD_PIXELS = 2.0;
-
     private static final double THREE_D_NEAREST_Z = -200.0;
     private static final double THREE_D_FARTHEST_Z = -5000.0;
     private static final double THREE_D_DEFAULT_CAMERA_Z = -1200.0;
@@ -51,11 +48,11 @@ public class Scene3DManager implements IVisualizationView {
     private final Rotate rotateX = new Rotate(0, Rotate.X_AXIS);
     private final Rotate rotateY = new Rotate(0, Rotate.Y_AXIS);
     private boolean isDragging;
+    private boolean isShiftClickSequence;
 
     private List<WordNode> currentWords;
     private int[] currentAxes;
 
-    // Shared state with 2D view behavior.
     private WordNode selectedWord;
     private WordNode probeSource;
     private List<WordNode> probeNeighbors;
@@ -76,8 +73,7 @@ public class Scene3DManager implements IVisualizationView {
         this.pressX = 0;
         this.pressY = 0;
         this.isDragging = false;
-
-        // Rotation transforms are final fields so camera angle persists across rebuilds.
+        this.isShiftClickSequence = false;
 
         Group initialRoot = new Group();
         this.subScene = new SubScene(initialRoot, 1, 1, true, SceneAntialiasing.BALANCED);
@@ -85,7 +81,6 @@ public class Scene3DManager implements IVisualizationView {
         this.subScene.heightProperty().bind(rootPane.heightProperty());
         this.subScene.setFill(Color.web("#111111"));
 
-        // Wire mouse interactions with proper click-vs-drag detection like the 2D view.
         this.subScene.addEventFilter(MouseEvent.MOUSE_PRESSED, this::handleSubSceneMousePressed);
         this.subScene.addEventFilter(MouseEvent.MOUSE_DRAGGED, this::handleSubSceneMouseDragged);
         this.subScene.addEventFilter(MouseEvent.MOUSE_RELEASED, this::handleSubSceneMouseReleased);
@@ -119,18 +114,12 @@ public class Scene3DManager implements IVisualizationView {
         } : listener;
     }
 
-    /**
-     * Focuses the 3D view on the provided word by updating marker style state.
-     */
     @Override
     public void focusOnWord(WordNode word) {
         this.selectedWord = word;
         rebuildPointCloud();
     }
 
-    /**
-     * Clears every active visual selection layer in the 3D view.
-     */
     @Override
     public void clearVisualSelection() {
         this.selectedWord = null;
@@ -179,40 +168,21 @@ public class Scene3DManager implements IVisualizationView {
         renderer.setSemanticPoles(poleA, poleB);
     }
 
-    /**
-     * Sets the selected source node so it can be highlighted in the 3D view.
-     */
-    public void setSelectedWord(WordNode selectedWord) {
-        this.selectedWord = selectedWord;
-    }
-
-    /**
-     * Zooms the 3D scene by moving the camera along the Z axis.
-     */
     public void zoom(double delta) {
         threeDCameraZ = Math.max(THREE_D_FARTHEST_Z, Math.min(THREE_D_NEAREST_Z, threeDCameraZ + delta));
         threeDCamera.setTranslateZ(threeDCameraZ);
     }
 
-    /**
-     * Rotates the 3D cloud around X and Y axes.
-     */
     public void rotate(double deltaX, double deltaY) {
         rotateX.setAngle(rotateX.getAngle() - deltaY * 0.5);
         rotateY.setAngle(rotateY.getAngle() + deltaX * 0.5);
     }
 
-    /**
-     * Stores the latest drag anchor used by the controller-side drag workflow.
-     */
     public void setDragAnchor(double sceneX, double sceneY) {
         this.anchorX = sceneX;
         this.anchorY = sceneY;
     }
 
-    /**
-     * Rotates using absolute scene coordinates and updates anchor state.
-     */
     public void rotateFromScenePosition(double sceneX, double sceneY) {
         double deltaX = sceneX - anchorX;
         double deltaY = sceneY - anchorY;
@@ -250,17 +220,15 @@ public class Scene3DManager implements IVisualizationView {
     }
 
     private void handleSubSceneMousePressed(MouseEvent event) {
-        // Store press anchor in scene coordinates for robust click-vs-drag detection.
         pressX = event.getSceneX();
         pressY = event.getSceneY();
-
-        // Initialize drag anchor for smooth rotation deltas.
         anchorX = event.getSceneX();
         anchorY = event.getSceneY();
         isDragging = false;
 
-        // Handle shift-click for subspace group membership (toggle immediately).
+        // Detect and isolate shift-click operations from regular single clicks.
         if (event.isShiftDown()) {
+            isShiftClickSequence = true;
             if (event.getTarget() instanceof Sphere) {
                 WordNode clickedWord = findWordNodeFromSphere((Sphere) event.getTarget());
                 if (clickedWord != null) {
@@ -276,6 +244,8 @@ public class Scene3DManager implements IVisualizationView {
                 }
             }
         }
+
+        isShiftClickSequence = false;
     }
 
     private void handleSubSceneMouseDragged(MouseEvent event) {
@@ -283,17 +253,14 @@ public class Scene3DManager implements IVisualizationView {
             return;
         }
 
-        // Calculate movement from press point to current position.
         double deltaX = event.getSceneX() - pressX;
         double deltaY = event.getSceneY() - pressY;
         double distanceMoved = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
 
-        // If movement exceeds threshold, it's a drag rotation, not a click.
         if (distanceMoved >= DRAG_THRESHOLD_PIXELS) {
             isDragging = true;
         }
 
-        // Only apply rotation if we've exceeded the drag threshold.
         if (isDragging) {
             rotateFromScenePosition(event.getSceneX(), event.getSceneY());
             event.consume();
@@ -301,18 +268,21 @@ public class Scene3DManager implements IVisualizationView {
     }
 
     private void handleSubSceneMouseReleased(MouseEvent event) {
-        // Calculate total movement from press anchor to release position.
+        // Prevent shift-click mouse release from triggering a standard single click.
+        if (isShiftClickSequence) {
+            isShiftClickSequence = false;
+            isDragging = false;
+            return;
+        }
+
         double deltaX = event.getSceneX() - pressX;
         double deltaY = event.getSceneY() - pressY;
         double distanceMoved = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
 
-        // Only process selection if the distance is below the drag threshold.
-        // This prevents drag release from being treated as empty click.
         if (distanceMoved < DRAG_THRESHOLD_PIXELS) {
             if (event.getTarget() instanceof Sphere) {
                 WordNode clickedWord = findWordNodeFromSphere((Sphere) event.getTarget());
                 if (clickedWord != null) {
-                    // A regular click starts standard probe selection and clears any existing subspace group.
                     selectedGroup.clear();
                     focusOnWord(clickedWord);
                     if (pointClickListener != null) {
@@ -323,7 +293,6 @@ public class Scene3DManager implements IVisualizationView {
                 }
             }
 
-            // Click on empty area: clear selection.
             clearVisualSelection();
             if (pointClickListener != null) {
                 pointClickListener.accept(null);
@@ -331,18 +300,10 @@ public class Scene3DManager implements IVisualizationView {
             event.consume();
         }
 
-        // Reset drag state for next interaction.
         isDragging = false;
     }
 
-    /**
-     * Extracts the WordNode associated with a Sphere by searching the current word list.
-     * Returns null if the sphere does not correspond to any word in the visualization.
-     */
     private WordNode findWordNodeFromSphere(Sphere sphere) {
-        // The sphere's position in 3D space uniquely identifies which word it represents.
-        // We search the current words list for a match based on position and color.
-        // For now, we use a heuristic: find word at closest distance to sphere position.
         double sphereX = sphere.getTranslateX();
         double sphereY = sphere.getTranslateY();
         double sphereZ = sphere.getTranslateZ();
@@ -376,12 +337,10 @@ public class Scene3DManager implements IVisualizationView {
     }
 
     private void handleWordLeafPressed(MouseEvent event) {
-        // Store press position for click-vs-drag detection.
         pressX = event.getSceneX();
         pressY = event.getSceneY();
         isDragging = false;
 
-        // Store drag anchor for rotation updates.
         anchorX = event.getSceneX();
         anchorY = event.getSceneY();
         event.consume();

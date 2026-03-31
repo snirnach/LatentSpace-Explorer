@@ -27,6 +27,7 @@ public class ViewController implements IPcaObserver {
     private final PcaStateSubject pcaStateSubject;
     private final CommandManager commandManager;
     private final Consumer<Boolean> onToggle3D;
+    private final Runnable onCommandExecuted;
 
     private Graph2DView graph2DView;
     private Scene3DManager scene3DManager;
@@ -37,12 +38,14 @@ public class ViewController implements IPcaObserver {
             ControlPanelView controlPanelView,
             PcaStateSubject pcaStateSubject,
             CommandManager commandManager,
-            Consumer<Boolean> onToggle3D
+            Consumer<Boolean> onToggle3D,
+            Runnable onCommandExecuted
     ) {
         this.controlPanelView = controlPanelView;
         this.pcaStateSubject = pcaStateSubject;
         this.commandManager = commandManager;
         this.onToggle3D = onToggle3D;
+        this.onCommandExecuted = onCommandExecuted;
 
         setupListeners();
         this.pcaStateSubject.attach(this);
@@ -65,11 +68,6 @@ public class ViewController implements IPcaObserver {
         controlPanelView.setOnZoomInAction(this::handleZoomInAction);
         controlPanelView.setOnZoomOutAction(this::handleZoomOutAction);
         controlPanelView.setOnPcaAxesChanged(this::handlePcaAxesChanged);
-        controlPanelView.setOnUndoAction(this::handleUndoAction);
-        controlPanelView.setOnRedoAction(this::handleRedoAction);
-        
-        // Initialize history button state
-        updateHistoryButtonsState();
     }
 
     /**
@@ -90,7 +88,9 @@ public class ViewController implements IPcaObserver {
                     newX, newY, newZ
             );
             commandManager.executeCommand(command);
-            updateHistoryButtonsState();
+            if (onCommandExecuted != null) {
+                onCommandExecuted.run();
+            }
         }
     }
 
@@ -132,33 +132,6 @@ public class ViewController implements IPcaObserver {
         }
     }
 
-    /**
-     * Updates the state of undo and redo buttons based on command history availability.
-     */
-    private void updateHistoryButtonsState() {
-        controlPanelView.setUndoButtonDisabled(!commandManager.canUndo());
-        controlPanelView.setRedoButtonDisabled(!commandManager.canRedo());
-    }
-
-    /**
-     * Handles undo action triggered by the Undo button.
-     */
-    private void handleUndoAction(javafx.event.ActionEvent event) {
-        if (commandManager.canUndo()) {
-            commandManager.undo();
-            updateHistoryButtonsState();
-        }
-    }
-
-    /**
-     * Handles redo action triggered by the Redo button.
-     */
-    private void handleRedoAction(javafx.event.ActionEvent event) {
-        if (commandManager.canRedo()) {
-            commandManager.redo();
-            updateHistoryButtonsState();
-        }
-    }
 
     /**
      * Attaches 3D-only panning and zoom handlers to the active center node.

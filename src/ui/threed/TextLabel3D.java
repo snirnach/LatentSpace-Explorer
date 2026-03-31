@@ -23,15 +23,11 @@ public class TextLabel3D implements IComponent3D {
 
     @Override
     public void attachTo(Group parent) {
-        // Create a 2D Text node and position it in 3D space offset from the word point.
         Text label = new Text(wordText);
         label.setFont(Font.font("Arial", 12));
-        // Use white labels so highlighted words remain readable on dark background.
-        label.setFill(Color.WHITE);
+        label.setFill(color);
         label.setStyle("-fx-font-weight: bold;");
 
-        // Position label offset from the word point so it floats above the sphere.
-        // Offset by approximately 15 units in X and Y for visibility.
         double offsetX = 15;
         double offsetY = -15;
         label.setTranslateX(wordPoint.getX() + offsetX);

@@ -14,14 +14,13 @@ import ui.view.Graph2DView;
 import ui.view.IVisualizationView;
 import ui.view.Scene3DManager;
 
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
 /**
  * Composes view, façade, and sub-controllers for the main application screen.
  */
-public class  MainController {
+public class MainController {
 
     private final LatentSpaceFacade facade;
     private final Scene3DManager scene3DManager;
@@ -31,11 +30,8 @@ public class  MainController {
     private final InteractionModel interactionModel;
     private final ControlPanelView controlPanelView;
     private final Graph2DView graph2DView;
-    private final ExplorationController explorationController;
     private final ViewController viewController;
     private final CommandManager commandManager;
-    @SuppressWarnings("unused")
-    private final MathAnalyticsController mathAnalyticsController;
 
     private IVisualizationView currentView;
     private BorderPane mainLayout;
@@ -53,19 +49,21 @@ public class  MainController {
         this.view3D = scene3DManager;
         this.currentView = view2D;
 
-        this.explorationController = new ExplorationController(
+        ExplorationController explorationController = new ExplorationController(
                 this.facade,
                 this.controlPanelView,
                 this.interactionModel,
                 () -> this.currentView,
-                this.commandManager
+                this.commandManager,
+                this::updateHistoryButtonsState
         );
 
         this.viewController = new ViewController(
                 this.controlPanelView,
                 this.pcaStateSubject,
                 this.commandManager,
-                this::switchVisualizationMode
+                this::switchVisualizationMode,
+                this::updateHistoryButtonsState
         );
         this.viewController.configureViewAccess(
                 this.graph2DView,
@@ -74,18 +72,36 @@ public class  MainController {
                 this::redrawChart
         );
 
-        this.mathAnalyticsController = new MathAnalyticsController(
+        new MathAnalyticsController(
                 this.facade,
                 this.controlPanelView,
+                this.interactionModel,
                 () -> this.currentView,
                 () -> new int[]{pcaStateSubject.getPcaX(), pcaStateSubject.getPcaY(), pcaStateSubject.getPcaZ()},
                 0,
-                this.commandManager
+                this.commandManager,
+                this::updateHistoryButtonsState
         );
 
-        // Keep click handling delegated to the exploration workflow controller.
         this.view2D.setOnWordClicked(explorationController::handleWordClick);
         this.view3D.setOnWordClicked(explorationController::handleWordClick);
+
+        controlPanelView.setOnUndoAction(e -> {
+            commandManager.undo();
+            updateHistoryButtonsState();
+        });
+
+        controlPanelView.setOnRedoAction(e -> {
+            commandManager.redo();
+            updateHistoryButtonsState();
+        });
+
+        updateHistoryButtonsState();
+    }
+
+    private void updateHistoryButtonsState() {
+        controlPanelView.setUndoButtonDisabled(!commandManager.canUndo());
+        controlPanelView.setRedoButtonDisabled(!commandManager.canRedo());
     }
 
     public Parent getView() {
@@ -109,8 +125,9 @@ public class  MainController {
             currentView = view2D;
         }
 
-        currentView.setOnWordClicked(explorationController::handleWordClick);
-        explorationController.resetVisualFocusState();
+        if (currentView != null) {
+            currentView.clearVisualSelection();
+        }
 
         if (mainLayout != null) {
             mainLayout.setCenter(currentView.getUIComponent());
@@ -129,34 +146,20 @@ public class  MainController {
                 .sorted(Comparator.comparing(WordNode::getWord, String.CASE_INSENSITIVE_ORDER))
                 .toList();
 
-        graph2DView.setSelectedWord(interactionModel.getSourceNode());
-        graph2DView.setHighlightedWords(buildHighlightedNodes(xIndex, yIndex));
-        scene3DManager.setSelectedWord(interactionModel.getSourceNode());
-
         int[] selectedAxes = new int[]{xIndex, yIndex, zIndex};
         view2D.updateData(allWords, selectedAxes);
         view3D.updateData(allWords, selectedAxes);
+
+        // Restore exploration state visually to the active view to ensure consistency
+        if (interactionModel.getActiveTargetNode() != null) {
+            currentView.showNearestNeighbors(interactionModel.getActiveTargetNode(), interactionModel.getActiveNeighborNodes());
+        } else if (interactionModel.getSourceNode() != null) {
+            currentView.focusOnWord(interactionModel.getSourceNode());
+        }
     }
 
     private boolean isThreeDModeActive() {
         return currentView == view3D;
-    }
-
-    private List<WordNode> buildHighlightedNodes(int xIndex, int yIndex) {
-        List<WordNode> highlightedNodes = new ArrayList<>();
-
-        WordNode targetNode = interactionModel.getActiveTargetNode();
-        if (targetNode != null && targetNode.hasValidPcaCoordinates(xIndex, yIndex)) {
-            highlightedNodes.add(targetNode);
-        }
-
-        for (WordNode neighbor : interactionModel.getActiveNeighborNodes()) {
-            if (neighbor != null && neighbor.hasValidPcaCoordinates(xIndex, yIndex)) {
-                highlightedNodes.add(neighbor);
-            }
-        }
-
-        return highlightedNodes;
     }
 
     private void updateStatusWithRepositoryInfo() {
@@ -173,13 +176,7 @@ public class  MainController {
         );
     }
 
-    /**
-     * Returns the CommandManager for executing, undoing, and redoing commands.
-     *
-     * @return the command manager
-     */
     public CommandManager getCommandManager() {
         return commandManager;
     }
 }
-

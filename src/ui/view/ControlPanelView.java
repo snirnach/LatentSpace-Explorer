@@ -117,7 +117,6 @@ public class ControlPanelView {
         this.redoButton.setDisable(true);
         this.redoButton.setFocusTraversable(false);
 
-        // ...existing code...
         this.searchButton.setFocusTraversable(false);
         this.toggle3dButton.setFocusTraversable(false);
         this.zoomInButton.setFocusTraversable(false);
@@ -149,9 +148,6 @@ public class ControlPanelView {
         pcaAxesChangeListener.onAxesChanged(x, y, z);
     }
 
-    /**
-     * Builds and returns the full sidebar wrapped in a ScrollPane.
-     */
     public ScrollPane getView() {
         VBox controlPanel = buildControlPanel();
         ScrollPane scrollPane = new ScrollPane(controlPanel);
@@ -174,10 +170,10 @@ public class ControlPanelView {
 
         Label distanceMetricLabel = new Label("Distance Metric");
         distanceMetricLabel.setStyle("-fx-text-fill: #333333;");
-        
+
         Label kLabel = new Label("K Neighbors");
         kLabel.setStyle("-fx-text-fill: #333333;");
-        
+
         Label targetWordLabel = new Label("Target Word");
         targetWordLabel.setStyle("-fx-text-fill: #333333;");
         searchField.setPromptText("Enter a word from the repository");
@@ -212,7 +208,7 @@ public class ControlPanelView {
                 distanceResultLabel,
                 statusLabel
         );
-        // Keep sidebar width stable so internal content updates do not shift layout bounds.
+
         controlPanel.setMinWidth(320);
         controlPanel.setPrefWidth(320);
         controlPanel.setMaxWidth(320);
@@ -421,14 +417,6 @@ public class ControlPanelView {
         return statusLabel;
     }
 
-    /**
-     * Updates the PCA ComboBox values without triggering change listeners.
-     * Used during undo/redo to update the UI without creating new commands.
-     *
-     * @param x the X axis component index
-     * @param y the Y axis component index
-     * @param z the Z axis component index
-     */
     public void setPcaComboBoxValues(int x, int y, int z) {
         try {
             isUpdatingProgrammatically = true;
@@ -440,24 +428,19 @@ public class ControlPanelView {
         }
     }
 
-    /**
-     * Sets the search field text.
-     * Used during undo/redo to restore the search text.
-     *
-     * @param text the search text to display
-     */
     public void setSearchText(String text) {
         searchField.setText(text != null ? text : "");
     }
 
-    /**
-     * Sets the equation field text.
-     * Used during undo/redo to restore the equation text.
-     *
-     * @param text the equation text to display
-     */
     public void setEquationText(String text) {
         equationField.setText(text != null ? text : "");
     }
-}
 
+    public void setSemanticAxisWordAText(String text) {
+        semanticAxisWordAField.setText(text != null ? text : "");
+    }
+
+    public void setSemanticAxisWordBText(String text) {
+        semanticAxisWordBField.setText(text != null ? text : "");
+    }
+}

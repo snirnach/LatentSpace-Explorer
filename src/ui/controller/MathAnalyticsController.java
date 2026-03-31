@@ -6,7 +6,9 @@ import javafx.event.ActionEvent;
 import model.WordNode;
 import service.LatentSpaceFacade;
 import command.CalculateEquationCommand;
+import command.ProjectSemanticAxisCommand;
 import command.CommandManager;
+import ui.state.InteractionModel;
 import ui.view.ControlPanelView;
 import ui.view.Graph2DRenderer;
 import ui.view.IVisualizationView;
@@ -24,49 +26,83 @@ public class MathAnalyticsController {
 
     private final LatentSpaceFacade facade;
     private final ControlPanelView controlPanelView;
+    private final InteractionModel interactionModel;
     private final Supplier<IVisualizationView> activeViewSupplier;
     private final Supplier<int[]> activeAxesSupplier;
     private final int semanticAxisTargetIndex;
     private final CommandManager commandManager;
+    private final Runnable onCommandExecuted;
+
+    private boolean isSemanticModeActive = false;
+    private List<Map.Entry<String, Double>> activeSemanticScores = null;
+    private WordNode activePoleA = null;
+    private WordNode activePoleB = null;
+    private String lastSearchedWordA = "";
+    private String lastSearchedWordB = "";
 
     public MathAnalyticsController(
             LatentSpaceFacade facade,
             ControlPanelView controlPanelView,
+            InteractionModel interactionModel,
             Supplier<IVisualizationView> activeViewSupplier
     ) {
-        this(facade, controlPanelView, activeViewSupplier, () -> new int[]{0, 1, 2}, 0, null);
+        this(facade, controlPanelView, interactionModel, activeViewSupplier, () -> new int[]{0, 1, 2}, 0, null, () -> {});
     }
 
     public MathAnalyticsController(
             LatentSpaceFacade facade,
             ControlPanelView controlPanelView,
+            InteractionModel interactionModel,
             Supplier<IVisualizationView> activeViewSupplier,
             Supplier<int[]> activeAxesSupplier,
             int semanticAxisTargetIndex
     ) {
-        this(facade, controlPanelView, activeViewSupplier, activeAxesSupplier, semanticAxisTargetIndex, null);
+        this(facade, controlPanelView, interactionModel, activeViewSupplier, activeAxesSupplier, semanticAxisTargetIndex, null, () -> {});
     }
 
     public MathAnalyticsController(
             LatentSpaceFacade facade,
             ControlPanelView controlPanelView,
+            InteractionModel interactionModel,
             Supplier<IVisualizationView> activeViewSupplier,
             Supplier<int[]> activeAxesSupplier,
             int semanticAxisTargetIndex,
-            CommandManager commandManager
+            CommandManager commandManager,
+            Runnable onCommandExecuted
     ) {
         this.facade = facade;
         this.controlPanelView = controlPanelView;
+        this.interactionModel = interactionModel;
         this.activeViewSupplier = activeViewSupplier;
         this.activeAxesSupplier = activeAxesSupplier;
         this.semanticAxisTargetIndex = semanticAxisTargetIndex;
         this.commandManager = commandManager;
+        this.onCommandExecuted = onCommandExecuted;
         setupListeners();
     }
 
     private void setupListeners() {
         controlPanelView.setOnCalculateEquationAction(this::handleCalculateEquationAction);
         controlPanelView.setOnProjectAxisAction(this::handleProjectOnAxisAction);
+    }
+
+    /**
+     * Updates the internal tracker for semantic state to ensure correct undo/redo operations.
+     */
+    public void setInternalSemanticState(
+            boolean isActive,
+            List<Map.Entry<String, Double>> scores,
+            WordNode poleA,
+            WordNode poleB,
+            String wordA,
+            String wordB
+    ) {
+        this.isSemanticModeActive = isActive;
+        this.activeSemanticScores = scores;
+        this.activePoleA = poleA;
+        this.activePoleB = poleB;
+        this.lastSearchedWordA = wordA != null ? wordA : "";
+        this.lastSearchedWordB = wordB != null ? wordB : "";
     }
 
     private void handleCalculateEquationAction(ActionEvent event) {
@@ -79,15 +115,20 @@ public class MathAnalyticsController {
             return;
         }
 
-        // Capture previous state before calculation
+        if (interactionModel != null) {
+            interactionModel.clearMeasurementState();
+            interactionModel.setActiveTargetNode(null);
+            interactionModel.setActiveNeighborNodes(List.of());
+        }
+        controlPanelView.setSearchText("");
+
         ObservableList<String> previousResults = FXCollections.observableArrayList(controlPanelView.getResultsListView().getItems());
         String previousResultsTitle = controlPanelView.getResultsTitleLabel().getText();
         String previousStatusMessage = controlPanelView.getStatusLabel().getText();
         String previousEquationText = controlPanelView.getEquationText();
-        WordNode previousResultWord = null; // We don't track this in current UI, so it's null
-        List<WordNode> previousEquationWords = new ArrayList<>(); // We don't track this in current UI
+        WordNode previousResultWord = null;
+        List<WordNode> previousEquationWords = new ArrayList<>();
 
-        // Calculate the new equation result
         List<WordNode> equationWords = new ArrayList<>();
         WordNode resultWord = facade.solveEquation(equationText, equationWords);
         if (resultWord == null) {
@@ -95,7 +136,6 @@ public class MathAnalyticsController {
             return;
         }
 
-        // Prepare new state
         ObservableList<String> newResults = FXCollections.observableArrayList();
         newResults.add(resultWord.getWord());
         String newResultsTitle = "Showing: Math Results";
@@ -103,7 +143,6 @@ public class MathAnalyticsController {
 
         IVisualizationView activeView = activeViewSupplier.get();
 
-        // Create command with both old and new state
         CalculateEquationCommand command = new CalculateEquationCommand(
                 activeView,
                 controlPanelView,
@@ -121,11 +160,11 @@ public class MathAnalyticsController {
                 equationText
         );
 
-
-        // Execute command through CommandManager if available
         if (commandManager != null) {
             commandManager.executeCommand(command);
-            updateHistoryButtonsState();
+            if (onCommandExecuted != null) {
+                onCommandExecuted.run();
+            }
         }
     }
 
@@ -133,13 +172,30 @@ public class MathAnalyticsController {
         String wordA = controlPanelView.getSemanticAxisWordAText();
         String wordB = controlPanelView.getSemanticAxisWordBText();
 
-        // 1. Validate user input
         if (wordA == null || wordA.isBlank() || wordB == null || wordB.isBlank()) {
             controlPanelView.setStatusMessage("Please enter both a positive and negative pole word.");
             return;
         }
 
-        // 2. Calculate semantic projection scores via the facade
+        // Capture previous state before applying semantic projection
+        ObservableList<String> previousResults = FXCollections.observableArrayList(controlPanelView.getResultsListView().getItems());
+        String previousResultsTitle = controlPanelView.getResultsTitleLabel().getText();
+        String previousStatusMessage = controlPanelView.getStatusLabel().getText();
+        String previousSearchText = controlPanelView.getSearchText();
+        String previousEquationText = controlPanelView.getEquationText();
+        String previousWordA = this.lastSearchedWordA;
+        String previousWordB = this.lastSearchedWordB;
+        boolean previousSemanticMode = this.isSemanticModeActive;
+        List<Map.Entry<String, Double>> previousScores = this.activeSemanticScores;
+        WordNode previousPoleA = this.activePoleA;
+        WordNode previousPoleB = this.activePoleB;
+
+        if (interactionModel != null) {
+            interactionModel.clearMeasurementState();
+            interactionModel.setActiveTargetNode(null);
+            interactionModel.setActiveNeighborNodes(List.of());
+        }
+
         List<Map.Entry<String, Double>> projections = facade.getSemanticProjection(wordA.trim(), wordB.trim());
 
         if (projections == null || projections.isEmpty()) {
@@ -148,49 +204,29 @@ public class MathAnalyticsController {
             return;
         }
 
-        // 3. Update the UI results list (textual representation)
         ObservableList<String> formattedResults = FXCollections.observableArrayList();
         for (Map.Entry<String, Double> entry : projections) {
-            String formatted = String.format("%s: %.3f", entry.getKey(), entry.getValue());
+            String formatted = String.format(java.util.Locale.US, "%s: %.3f", entry.getKey(), entry.getValue());
             formattedResults.add(formatted);
         }
-        controlPanelView.displayResults(formattedResults);
-        controlPanelView.setResultsTitle("Showing: Semantic Projection");
 
-        // 4. Update the Visualization View (The visual "Bridge")
-        IVisualizationView activeView = activeViewSupplier.get();
-        if (activeView != null) {
-            WordNode poleANode = facade.getWordNode(wordA.trim());
-            WordNode poleBNode = facade.getWordNode(wordB.trim());
+        WordNode poleANode = facade.getWordNode(wordA.trim());
+        WordNode poleBNode = facade.getWordNode(wordB.trim());
+        String newTitle = "Showing: Semantic Projection";
+        String newStatus = "Semantic projection calculated using '" + wordA + "' (positive) and '" + wordB + "' (negative).";
 
-            // Pass the calculated semantic scores to the view/renderer
-            activeView.setSemanticScores(projections);
-            activeView.setSemanticPoles(poleANode, poleBNode);
+        ProjectSemanticAxisCommand command = new ProjectSemanticAxisCommand(
+                activeViewSupplier.get(), controlPanelView, facade.getAllWords(), activeAxesSupplier, semanticAxisTargetIndex, this,
+                previousResults, previousResultsTitle, previousStatusMessage, previousSearchText, previousEquationText, previousWordA, previousWordB,
+                previousSemanticMode, previousScores, previousPoleA, previousPoleB,
+                formattedResults, newTitle, newStatus, wordA, wordB, projections, poleANode, poleBNode
+        );
 
-            // Create a DEEP COPY of the current PCA axes to avoid modifying original state
-            int[] baseAxes = activeAxesSupplier.get();
-            int[] projectedAxes = java.util.Arrays.copyOf(baseAxes, baseAxes.length);
-
-            // Map the custom semantic axis (index 999) to the target dimension (X, Y, or Z)
-            int targetIdx = Math.clamp(semanticAxisTargetIndex, 0, 2);
-            projectedAxes[targetIdx] = Graph2DRenderer.SEMANTIC_AXIS_INDEX; // Uses the 999 sentinel value
-
-            // Trigger a full redraw with the new semantic coordinate mapping
-            Collection<WordNode> allWords = facade.getAllWords();
-            activeView.updateData(allWords, projectedAxes);
-        }
-
-        controlPanelView.setStatusMessage("Semantic projection calculated using '" + wordA + "' (positive) and '" + wordB + "' (negative).");
-    }
-
-    /**
-     * Updates the state of undo and redo buttons based on command history availability.
-     */
-    private void updateHistoryButtonsState() {
         if (commandManager != null) {
-            controlPanelView.setUndoButtonDisabled(!commandManager.canUndo());
-            controlPanelView.setRedoButtonDisabled(!commandManager.canRedo());
+            commandManager.executeCommand(command);
+            if (onCommandExecuted != null) {
+                onCommandExecuted.run();
+            }
         }
     }
 }
-

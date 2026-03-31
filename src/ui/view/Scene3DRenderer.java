@@ -84,7 +84,6 @@ public class Scene3DRenderer {
 
     /**
      * Builds a full point-cloud group containing base markers, highlights, paths, and labels.
-     * The returned group has no camera transforms applied.
      */
     public Group buildPointCloudGroup(
             List<WordNode> words,
@@ -181,23 +180,14 @@ public class Scene3DRenderer {
         return pointCloudRoot;
     }
 
-    /**
-     * Returns the center point computed during the latest build call.
-     */
     public Point3D getLastComputedCenter() {
         return lastComputedCenter;
     }
 
-    /**
-     * Indicates whether the latest build contained any renderable word points.
-     */
     public boolean hasRenderablePoints() {
         return hasRenderablePoints;
     }
 
-    /**
-     * Projects a word into scaled 3D PCA coordinates for the selected axes.
-     */
     public Point3D projectWordPoint(WordNode wordNode, int[] axes) {
         if (wordNode == null || axes == null || axes.length < 3) {
             return null;
@@ -337,8 +327,7 @@ public class Scene3DRenderer {
     }
 
     /**
-     * Adds persistent 3D text labels for selected, probe, and math path words.
-     * Labels appear offset from word points so they do not obscure the points themselves.
+     * Adds persistent 3D text labels. All labels are now rendered in white for dark background contrast.
      */
     private void addTextLabels(
             CompositeCluster3D labelCluster,
@@ -349,31 +338,32 @@ public class Scene3DRenderer {
             List<WordNode> mathPathWords,
             WordNode mathResultWord
     ) {
+        // Updated to explicitly use Color.WHITE for all label instances
         if (focusedWord != null && focusedWord.getWord() != null) {
             Point3D point = pointByWord.get(normalizeWord(focusedWord));
             if (point != null) {
-                labelCluster.add(new TextLabel3D(focusedWord.getWord(), point, Color.RED));
+                labelCluster.add(new TextLabel3D(focusedWord.getWord(), point, Color.WHITE));
             }
         }
 
         if (semanticPoleA != null && semanticPoleA.getWord() != null) {
             Point3D point = pointByWord.get(normalizeWord(semanticPoleA));
             if (point != null) {
-                labelCluster.add(new TextLabel3D(semanticPoleA.getWord(), point, SEMANTIC_POLE_A_COLOR));
+                labelCluster.add(new TextLabel3D(semanticPoleA.getWord(), point, Color.WHITE));
             }
         }
 
         if (semanticPoleB != null && semanticPoleB.getWord() != null) {
             Point3D point = pointByWord.get(normalizeWord(semanticPoleB));
             if (point != null) {
-                labelCluster.add(new TextLabel3D(semanticPoleB.getWord(), point, SEMANTIC_POLE_B_COLOR));
+                labelCluster.add(new TextLabel3D(semanticPoleB.getWord(), point, Color.WHITE));
             }
         }
 
         if (probeSource != null && probeSource.getWord() != null) {
             Point3D point = pointByWord.get(normalizeWord(probeSource));
             if (point != null) {
-                labelCluster.add(new TextLabel3D(probeSource.getWord(), point, Color.ORANGE));
+                labelCluster.add(new TextLabel3D(probeSource.getWord(), point, Color.WHITE));
             }
         }
 
@@ -382,7 +372,7 @@ public class Scene3DRenderer {
                 if (neighbor != null && neighbor.getWord() != null) {
                     Point3D point = pointByWord.get(normalizeWord(neighbor));
                     if (point != null) {
-                        labelCluster.add(new TextLabel3D(neighbor.getWord(), point, Color.GREEN));
+                        labelCluster.add(new TextLabel3D(neighbor.getWord(), point, Color.WHITE));
                     }
                 }
             }
@@ -393,7 +383,7 @@ public class Scene3DRenderer {
                 if (pathWord != null && pathWord.getWord() != null) {
                     Point3D point = pointByWord.get(normalizeWord(pathWord));
                     if (point != null) {
-                        labelCluster.add(new TextLabel3D(pathWord.getWord(), point, Color.MAGENTA));
+                        labelCluster.add(new TextLabel3D(pathWord.getWord(), point, Color.WHITE));
                     }
                 }
             }
@@ -402,7 +392,7 @@ public class Scene3DRenderer {
         if (mathResultWord != null && mathResultWord.getWord() != null) {
             Point3D point = pointByWord.get(normalizeWord(mathResultWord));
             if (point != null) {
-                labelCluster.add(new TextLabel3D(mathResultWord.getWord(), point, Color.DODGERBLUE));
+                labelCluster.add(new TextLabel3D(mathResultWord.getWord(), point, Color.WHITE));
             }
         }
     }
@@ -479,5 +469,3 @@ public class Scene3DRenderer {
     public record Marker3DStyle(Color color, double radius, boolean highlighted) {
     }
 }
-
-

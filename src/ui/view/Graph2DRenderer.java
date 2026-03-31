@@ -35,8 +35,6 @@ public class Graph2DRenderer {
 
     private final GraphicsContext gc;
 
-    private Set<String> highlightedWordKeys = Set.of();
-    private String sourceWordKey;
     private final Map<String, Double> semanticScoreByWord = new HashMap<>();
     private WordNode semanticPoleA;
     private WordNode semanticPoleB;
@@ -45,14 +43,6 @@ public class Graph2DRenderer {
         this.gc = gc;
     }
 
-    public void setHighlightState(Set<String> highlightedWordKeys, String sourceWordKey) {
-        this.highlightedWordKeys = highlightedWordKeys == null ? Set.of() : new HashSet<>(highlightedWordKeys);
-        this.sourceWordKey = sourceWordKey;
-    }
-
-    /**
-     * Caches semantic projection scores for optional semantic-axis rendering.
-     */
     public void setSemanticScores(List<Map.Entry<String, Double>> projections) {
         semanticScoreByWord.clear();
         if (projections == null) {
@@ -67,9 +57,6 @@ public class Graph2DRenderer {
         }
     }
 
-    /**
-     * Stores semantic pole words for explicit visual highlighting.
-     */
     public void setSemanticPoles(WordNode poleA, WordNode poleB) {
         this.semanticPoleA = poleA;
         this.semanticPoleB = poleB;
@@ -107,7 +94,6 @@ public class Graph2DRenderer {
         List<WordNode> safeProbeNeighbors = probeNeighbors == null ? List.of() : probeNeighbors;
         Set<WordNode> safeSelectedGroup = selectedGroup == null ? Set.of() : selectedGroup;
 
-        // Draw vector arithmetic path before marker rendering.
         if (mathPathWords != null && !mathPathWords.isEmpty()) {
             gc.save();
             gc.setStroke(MATH_PATH_COLOR);
@@ -141,7 +127,6 @@ public class Graph2DRenderer {
             gc.restore();
         }
 
-        // Draw probe connection lines before marker rendering.
         if (!safeProbeNeighbors.isEmpty() && hasCoordinates(probeSource, axisX, axisY)) {
             double sourceX = toCanvasX(getAxisValue(probeSource, axisX), width, range.minX, range.maxX, offsetX, zoomFactor);
             double sourceY = toCanvasY(getAxisValue(probeSource, axisY), height, range.minY, range.maxY, offsetY, zoomFactor);
@@ -255,13 +240,8 @@ public class Graph2DRenderer {
                 continue;
             }
 
-            MarkerStyle style = resolveStyle(wordNode);
-            if (BASE_COLOR.equals(style.color)) {
-                gc.setFill(Color.BLACK);
-            } else {
-                gc.setFill(Color.web(style.color));
-            }
-            gc.fillOval(pixelX - (style.size / 2.0), pixelY - (style.size / 2.0), style.size, style.size);
+            gc.setFill(Color.BLACK);
+            gc.fillOval(pixelX - (BASE_POINT_SIZE / 2.0), pixelY - (BASE_POINT_SIZE / 2.0), BASE_POINT_SIZE, BASE_POINT_SIZE);
         }
     }
 
@@ -275,19 +255,6 @@ public class Graph2DRenderer {
         double normalized = (valueY - minY) / (maxY - minY);
         double baseY = (1.0 - normalized) * height;
         return offsetY + (baseY * zoomFactor);
-    }
-
-    private MarkerStyle resolveStyle(WordNode wordNode) {
-        String key = wordNode.getWord() == null ? null : wordNode.getWord().toLowerCase(Locale.ROOT);
-        if (key != null && key.equals(sourceWordKey)) {
-            return new MarkerStyle(SOURCE_COLOR, HIGHLIGHT_POINT_SIZE);
-        }
-
-        if (key != null && highlightedWordKeys.contains(key)) {
-            return new MarkerStyle(HIGHLIGHT_COLOR, HIGHLIGHT_POINT_SIZE);
-        }
-
-        return new MarkerStyle(BASE_COLOR, BASE_POINT_SIZE);
     }
 
     private boolean isStrictWordMatch(WordNode currentWord, WordNode otherWord) {
@@ -364,17 +331,6 @@ public class Graph2DRenderer {
         return wordNode.getPcaVector()[axisIndex];
     }
 
-
-    private static class MarkerStyle {
-        private final String color;
-        private final double size;
-
-        private MarkerStyle(String color, double size) {
-            this.color = color;
-            this.size = size;
-        }
-    }
-
     private static class DataRange {
         private boolean hasValidRange;
         private double minX = Double.POSITIVE_INFINITY;
@@ -383,6 +339,3 @@ public class Graph2DRenderer {
         private double maxY = Double.NEGATIVE_INFINITY;
     }
 }
-
-
-

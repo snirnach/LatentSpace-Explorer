@@ -42,9 +42,8 @@ public class Graph2DView implements IVisualizationView {
     private double offsetX = 0.0;
     private double offsetY = 0.0;
     private boolean suppressPanUntilRelease;
+    private boolean isShiftClickSequence;
 
-    private Set<String> highlightedWordKeys;
-    private String sourceWordKey;
     private WordNode focusedWord = null;
 
     private List<WordNode> cachedWords;
@@ -74,7 +73,6 @@ public class Graph2DView implements IVisualizationView {
         this.canvas.setFocusTraversable(false);
         this.centerWrapper.getChildren().add(canvas);
 
-        // Bind canvas size to wrapper size so rendering always fills the center area.
         canvas.widthProperty().bind(centerWrapper.widthProperty());
         canvas.heightProperty().bind(centerWrapper.heightProperty());
 
@@ -85,39 +83,29 @@ public class Graph2DView implements IVisualizationView {
 
         this.onWordClicked = ignoredWord -> {
         };
-        this.highlightedWordKeys = Set.of();
         this.cachedWords = List.of();
         this.axisX = 0;
         this.axisY = 1;
         this.suppressPanUntilRelease = false;
+        this.isShiftClickSequence = false;
 
         wireInteractions();
 
-        // Redraw when layout size changes.
         centerWrapper.widthProperty().addListener(ignoredObservable -> redraw());
         centerWrapper.heightProperty().addListener(ignoredObservable -> redraw());
     }
 
-    /**
-     * Returns the clipped 2D canvas container.
-     */
     @Override
     public Pane getUIComponent() {
         return centerWrapper;
     }
 
-    /**
-     * Registers a callback that is invoked when a rendered point is clicked.
-     */
     @Override
     public void setOnWordClicked(Consumer<WordNode> listener) {
         this.onWordClicked = listener == null ? ignoredWord -> {
         } : listener;
     }
 
-    /**
-     * Centers the current 2D camera transform on the given word, if it is plottable.
-     */
     @Override
     public void focusOnWord(WordNode word) {
         this.focusedWord = word;
@@ -133,19 +121,14 @@ public class Graph2DView implements IVisualizationView {
             return;
         }
 
-        // Calculate the raw un-panned pixel position for the active axes.
         double rawPixelX = renderer.toCanvasX(axisXValue, canvas.getWidth(), minX, maxX, 0.0, zoomFactor);
         double rawPixelY = renderer.toCanvasY(axisYValue, canvas.getHeight(), minY, maxY, 0.0, zoomFactor);
 
-        // Recenter by offsetting the raw pixel position into the canvas center.
         this.offsetX = (canvas.getWidth() / 2.0) - rawPixelX;
         this.offsetY = (canvas.getHeight() / 2.0) - rawPixelY;
         redraw();
     }
 
-    /**
-     * Clears every visual selection layer so no stale highlights remain on screen.
-     */
     @Override
     public void clearVisualSelection() {
         this.focusedWord = null;
@@ -154,54 +137,17 @@ public class Graph2DView implements IVisualizationView {
         this.mathPathWords = null;
         this.mathResultWord = null;
         this.selectedGroup.clear();
-        this.highlightedWordKeys = Set.of();
-        this.sourceWordKey = null;
         redraw();
     }
 
-    /**
-     * Updates highlighted words rendered in emphasized style.
-     */
-    public void setHighlightedWords(Collection<WordNode> highlightedWords) {
-        if (highlightedWords == null || highlightedWords.isEmpty()) {
-            this.highlightedWordKeys = Set.of();
-            return;
-        }
-
-        Set<String> normalizedKeys = new HashSet<>();
-        for (WordNode wordNode : highlightedWords) {
-            if (wordNode != null && wordNode.getWord() != null) {
-                normalizedKeys.add(wordNode.getWord().toLowerCase(Locale.ROOT));
-            }
-        }
-        this.highlightedWordKeys = normalizedKeys;
-    }
-
-    /**
-     * Updates the currently selected source word rendered in dedicated style.
-     */
-    public void setSelectedWord(WordNode selectedWord) {
-        if (selectedWord == null || selectedWord.getWord() == null) {
-            this.sourceWordKey = null;
-            return;
-        }
-
-        this.sourceWordKey = selectedWord.getWord().toLowerCase(Locale.ROOT);
-    }
-
-    /**
-     * Caches new data and redraws all points on canvas using the selected PCA axes.
-     */
     @Override
     public void updateData(Collection<WordNode> words, int[] selectedAxes) {
         this.axisX = (selectedAxes != null && selectedAxes.length > 0) ? selectedAxes[0] : 0;
         this.axisY = (selectedAxes != null && selectedAxes.length > 1) ? selectedAxes[1] : 1;
         this.cachedWords = words == null ? List.of() : new ArrayList<>(words);
 
-        // Force recalculation of min/max bounds for the new axes BEFORE focusing
         computeDataRange();
 
-        // Auto-refocus if a word is currently selected, otherwise just redraw
         if (this.focusedWord != null) {
             focusOnWord(this.focusedWord);
         } else {
@@ -209,10 +155,6 @@ public class Graph2DView implements IVisualizationView {
         }
     }
 
-    /**
-     * Displays the nearest neighbors probe visualization for a source word
-     * with connections/highlights to its neighbors.
-     */
     @Override
     public void showNearestNeighbors(WordNode source, List<WordNode> neighbors) {
         this.probeSource = source;
@@ -233,7 +175,6 @@ public class Graph2DView implements IVisualizationView {
             this.probeNeighbors.clear();
         }
 
-        // Center the view around the arithmetic path centroid before rendering.
         computeDataRange();
         double width = canvas.getWidth();
         double height = canvas.getHeight();
@@ -270,7 +211,6 @@ public class Graph2DView implements IVisualizationView {
                 double centerX = width / 2.0;
                 double centerY = height / 2.0;
 
-                // Use the same centering formula as focusOnWord.
                 offsetX = centerX - (baseX * zoomFactor);
                 offsetY = centerY - (baseY * zoomFactor);
             }
@@ -308,20 +248,13 @@ public class Graph2DView implements IVisualizationView {
         renderer.setSemanticPoles(poleA, poleB);
     }
 
-    /**
-     * Performs zoom-in with predefined step.
-     */
     public void zoomIn() {
         applyZoomAt(canvas.getWidth() / 2.0, canvas.getHeight() / 2.0, TWO_D_ZOOM_STEP);
     }
 
-    /**
-     * Performs zoom-out with predefined step.
-     */
     public void zoomOut() {
         applyZoomAt(canvas.getWidth() / 2.0, canvas.getHeight() / 2.0, 1.0 / TWO_D_ZOOM_STEP);
     }
-
 
     private void wireInteractions() {
         canvas.setOnScroll(this::handleCanvasScroll);
@@ -345,16 +278,14 @@ public class Graph2DView implements IVisualizationView {
             return;
         }
 
-        // Store press anchor in scene coordinates for robust click-vs-drag detection.
         pressMouseX = event.getSceneX();
         pressMouseY = event.getSceneY();
-
-        // Track the latest drag anchor independently for smooth panning deltas.
         lastMouseX = event.getSceneX();
         lastMouseY = event.getSceneY();
 
-        // Handle shift-click for subspace group membership (toggle immediately).
+        // Detect and isolate shift-click operations from regular single clicks.
         if (event.isShiftDown()) {
+            isShiftClickSequence = true;
             WordNode clickedWord = findClosestWord(event.getX(), event.getY());
             if (clickedWord != null) {
                 if (selectedGroup.stream().anyMatch(node -> node != null && node.isSameWord(clickedWord))) {
@@ -369,7 +300,7 @@ public class Graph2DView implements IVisualizationView {
             }
         }
 
-        // For regular clicks, we wait until mouse release to determine if it's a click or drag.
+        isShiftClickSequence = false;
         suppressPanUntilRelease = false;
     }
 
@@ -390,7 +321,6 @@ public class Graph2DView implements IVisualizationView {
             return;
         }
 
-        // Dragging only pans by updating the viewport offsets.
         offsetX += deltaX;
         offsetY += deltaY;
         redraw();
@@ -400,26 +330,26 @@ public class Graph2DView implements IVisualizationView {
         event.consume();
     }
 
-    /**
-     * Handles mouse release: detects click vs drag based on distance threshold.
-     * If distance is below threshold, processes word selection. Otherwise, it was a pan.
-     */
     private void handleMouseReleased(MouseEvent event) {
         if (!event.getButton().equals(MouseButton.PRIMARY)) {
             suppressPanUntilRelease = false;
             return;
         }
 
-        // Calculate total movement from press anchor to release position.
+        // Prevent shift-click mouse release from triggering a standard single click.
+        if (isShiftClickSequence) {
+            isShiftClickSequence = false;
+            suppressPanUntilRelease = false;
+            return;
+        }
+
         double deltaX = event.getSceneX() - pressMouseX;
         double deltaY = event.getSceneY() - pressMouseY;
         double distanceMoved = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
 
-        // Only process word selection if the distance is below the drag threshold.
         if (distanceMoved < DRAG_THRESHOLD_PIXELS) {
             WordNode closestWord = findClosestWord(event.getX(), event.getY());
             if (closestWord != null) {
-                // A regular click starts standard probe selection and clears any existing subspace group selection.
                 selectedGroup.clear();
                 focusOnWord(closestWord);
                 if (onWordClicked != null) {
@@ -428,7 +358,6 @@ public class Graph2DView implements IVisualizationView {
                 suppressPanUntilRelease = true;
                 event.consume();
             } else {
-                // Click on empty area: clear selection.
                 clearVisualSelection();
                 if (onWordClicked != null) {
                     onWordClicked.accept(null);
@@ -437,7 +366,6 @@ public class Graph2DView implements IVisualizationView {
                 event.consume();
             }
         } else {
-            // It was a drag/pan operation: do not change selection.
             suppressPanUntilRelease = false;
         }
     }
@@ -447,7 +375,6 @@ public class Graph2DView implements IVisualizationView {
         double clampedZoom = Math.max(TWO_D_MIN_SCALE, Math.min(TWO_D_MAX_SCALE, targetZoom));
         double appliedMultiplier = clampedZoom / zoomFactor;
 
-        // Keep the point under the cursor fixed while zooming.
         double dx = mouseX - offsetX;
         double dy = mouseY - offsetY;
         offsetX -= dx * (appliedMultiplier - 1.0);
@@ -488,7 +415,6 @@ public class Graph2DView implements IVisualizationView {
             effectiveFocusedWord = null;
         }
 
-        renderer.setHighlightState(highlightedWordKeys, sourceWordKey);
         renderer.render(
                 width,
                 height,
@@ -600,8 +526,4 @@ public class Graph2DView implements IVisualizationView {
 
         return wordNode.getPcaVector()[axisIndex];
     }
-
-
 }
-
-
